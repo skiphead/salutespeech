@@ -1,3 +1,6 @@
+// Package sync provides client functionality for synchronous speech recognition
+// using the SaluteSpeech API. It handles audio file validation, HTTP requests,
+// authentication, and response parsing for real-time recognition scenarios.
 package sync
 
 import (
@@ -17,7 +20,9 @@ import (
 	"github.com/skiphead/salutespeech/types"
 )
 
-// Client handles sync recognition
+// Client handles synchronous speech recognition operations.
+// It manages HTTP communication, authentication, and request validation
+// for real-time audio transcription through the SaluteSpeech API.
 type Client struct {
 	httpClient *http.Client
 	baseURL    string
@@ -25,15 +30,20 @@ type Client struct {
 	logger     types.Logger
 }
 
-// Config represents sync recognition client configuration
+// Config represents the configuration options for creating a new sync recognition client.
+// It allows customization of the API endpoint, timeout behavior, TLS settings, and logging.
 type Config struct {
-	BaseURL       string
-	Timeout       time.Duration
-	AllowInsecure bool
-	Logger        types.Logger
+	BaseURL       string        // API endpoint URL (defaults to DefaultSyncRecognitionURL)
+	Timeout       time.Duration // Request timeout (defaults to 2x DefaultAPITimeout)
+	AllowInsecure bool          // When true, disables TLS certificate verification
+	Logger        types.Logger  // Logger instance for client operations
 }
 
-// NewClient creates new sync recognition client
+// NewClient creates a new synchronous speech recognition client with the provided configuration.
+// It initializes the HTTP client, validates the token manager, and sets up default values
+// for any missing configuration parameters.
+//
+// Returns an error if token manager is nil or if configuration validation fails.
 func NewClient(tokenMgr *client.TokenManager, cfg Config) (*Client, error) {
 	if tokenMgr == nil {
 		return nil, types.ErrTokenManagerRequired
@@ -75,7 +85,12 @@ func NewClient(tokenMgr *client.TokenManager, cfg Config) (*Client, error) {
 	}, nil
 }
 
-// Recognize performs sync recognition
+// Recognize performs synchronous speech recognition on the provided audio data.
+// It handles authentication, request construction, and response parsing.
+// The context can be used for cancellation and timeout control.
+//
+// Returns the recognition response containing transcribed text and metadata,
+// or an error if the request fails or validation checks are not met.
 func (c *Client) Recognize(ctx context.Context, req *Request) (*Response, error) {
 	if err := c.validateRequest(req); err != nil {
 		return nil, fmt.Errorf("invalid request: %w", err)
@@ -126,13 +141,18 @@ func (c *Client) Recognize(ctx context.Context, req *Request) (*Response, error)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			return
+		}
+	}(resp.Body)
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
 	}
-
+	fmt.Println(string(body))
 	switch resp.StatusCode {
 	case http.StatusOK:
 		var syncResp Response
@@ -159,7 +179,12 @@ func (c *Client) Recognize(ctx context.Context, req *Request) (*Response, error)
 	}
 }
 
-// RecognizeFromFile recognizes audio from file
+// RecognizeFromFile reads and recognizes audio from a file.
+// It validates file size against API limits (max 2MB), reads the file content,
+// and performs synchronous recognition with the provided options.
+//
+// Returns the recognition response or an error if file reading fails,
+// validation checks fail, or the recognition request fails.
 func (c *Client) RecognizeFromFile(ctx context.Context, filePath string, contentType types.ContentType, opts Options) (*Response, error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
@@ -187,6 +212,10 @@ func (c *Client) RecognizeFromFile(ctx context.Context, filePath string, content
 	return c.Recognize(ctx, req)
 }
 
+// validateRequest performs comprehensive validation of the recognition request.
+// It checks for nil request, non-empty audio data, file size limits,
+// valid content type, supported language, and valid sample rate.
+// Default values are applied for missing optional parameters.
 func (c *Client) validateRequest(req *Request) error {
 	if req == nil {
 		return types.ErrRequestNil

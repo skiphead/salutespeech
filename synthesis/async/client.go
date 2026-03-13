@@ -1,3 +1,6 @@
+// Package async provides client functionality for asynchronous speech synthesis
+// using the SaluteSpeech API. It supports creating synthesis tasks, monitoring
+// task status, and downloading generated audio files for text-to-speech conversion.
 package async
 
 import (
@@ -15,27 +18,34 @@ import (
 	"github.com/skiphead/salutespeech/types"
 )
 
-// Client handles async synthesis
+// Client handles asynchronous speech synthesis operations.
+// It manages task creation, status polling, and audio file retrieval
+// for long-running text-to-speech conversion jobs through the SaluteSpeech API.
 type Client struct {
 	httpClient    *http.Client
-	synthesizeURL string
-	taskURL       string
-	downloadURL   string
+	synthesizeURL string // URL for creating synthesis tasks
+	taskURL       string // URL for checking task status
+	downloadURL   string // URL for downloading synthesized audio
 	tokenMgr      *client.TokenManager
 	logger        types.Logger
 }
 
-// Config represents synthesis client configuration
+// Config represents the configuration options for creating a new async synthesis client.
+// It allows customization of API endpoints, timeout behavior, TLS settings, and logging.
 type Config struct {
-	BaseURL       string
-	TaskURL       string
-	DownloadURL   string
-	Timeout       time.Duration
-	AllowInsecure bool
-	Logger        types.Logger
+	BaseURL       string        // URL for task creation (defaults to DefaultSynthesizeURL)
+	TaskURL       string        // URL for status checking (defaults to DefaultTaskURL)
+	DownloadURL   string        // URL for audio download (defaults to DefaultDownloadURL)
+	Timeout       time.Duration // HTTP client timeout (defaults to DefaultAPITimeout)
+	AllowInsecure bool          // When true, disables TLS certificate verification
+	Logger        types.Logger  // Logger instance for client operations
 }
 
-// NewClient creates new synthesis client
+// NewClient creates a new asynchronous speech synthesis client with the provided configuration.
+// It initializes the HTTP client, validates the token manager, and sets up default values
+// for any missing configuration parameters.
+//
+// Returns an error if token manager is nil or if configuration validation fails.
 func NewClient(tokenMgr *client.TokenManager, cfg Config) (*Client, error) {
 	if tokenMgr == nil {
 		return nil, types.ErrTokenManagerRequired
@@ -88,7 +98,12 @@ func NewClient(tokenMgr *client.TokenManager, cfg Config) (*Client, error) {
 	}, nil
 }
 
-// CreateTask creates async synthesis task
+// CreateTask creates an asynchronous speech synthesis task.
+// It submits a text-to-speech request with the specified parameters including
+// voice, audio encoding, and text content via the request file ID.
+//
+// Returns a task response containing the task ID for subsequent status checking
+// and result retrieval, or an error if validation or API request fails.
 func (c *Client) CreateTask(ctx context.Context, req *Request) (*Response, error) {
 	if req == nil || req.RequestFileID == "" || req.AudioEncoding == "" || req.Voice == "" {
 		return nil, fmt.Errorf("invalid synthesis request")
@@ -117,7 +132,12 @@ func (c *Client) CreateTask(ctx context.Context, req *Request) (*Response, error
 	if err != nil {
 		return nil, fmt.Errorf("request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			c.logger.Warn("failed to close response body")
+		}
+	}(resp.Body)
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -138,7 +158,9 @@ func (c *Client) CreateTask(ctx context.Context, req *Request) (*Response, error
 	return &synthResp, nil
 }
 
-// GetTaskStatus gets synthesis task status
+// GetTaskStatus retrieves the current status of an asynchronous synthesis task.
+// It returns a task status response containing information about the task's progress,
+// including whether it's pending, processing, completed, or failed.
 func (c *Client) GetTaskStatus(ctx context.Context, taskID string) (*types.TaskStatusResponse, error) {
 	authHeader, err := c.tokenMgr.GetTokenWithHeader(ctx)
 	if err != nil {
@@ -161,7 +183,12 @@ func (c *Client) GetTaskStatus(ctx context.Context, taskID string) (*types.TaskS
 	if err != nil {
 		return nil, fmt.Errorf("request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			c.logger.Warn("close response body")
+		}
+	}(resp.Body)
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -179,7 +206,9 @@ func (c *Client) GetTaskStatus(ctx context.Context, taskID string) (*types.TaskS
 	return &statusResp, nil
 }
 
-// DownloadResult downloads synthesis result
+// DownloadResult downloads the synthesized audio for a completed task.
+// It retrieves the audio file using the response file ID provided in the task status.
+// Returns the audio data as a byte slice or an error if download fails.
 func (c *Client) DownloadResult(ctx context.Context, responseFileID string) ([]byte, error) {
 	authHeader, err := c.tokenMgr.GetTokenWithHeader(ctx)
 	if err != nil {
@@ -202,7 +231,12 @@ func (c *Client) DownloadResult(ctx context.Context, responseFileID string) ([]b
 	if err != nil {
 		return nil, fmt.Errorf("download request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			return
+		}
+	}(resp.Body)
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -215,7 +249,20 @@ func (c *Client) DownloadResult(ctx context.Context, responseFileID string) ([]b
 	return body, nil
 }
 
-// WaitForTask waits for synthesis completion
+// WaitForTask polls the task status until completion, error, or timeout.
+// It periodically checks the task status at the specified poll interval
+// and returns when the task is completed. Optionally downloads the audio
+// if downloadAudio is true.
+//
+// Parameters:
+//   - ctx: Context for cancellation
+//   - taskID: The ID of the task to wait for
+//   - pollInterval: Time between status checks (defaults to DefaultPollInterval if zero)
+//   - timeout: Maximum time to wait for completion (defaults to DefaultWaitTimeout if zero)
+//   - downloadAudio: If true, automatically downloads the synthesized audio
+//
+// Returns a TaskResult containing task metadata and optionally the audio data,
+// or an error if the task fails or timeout occurs.
 func (c *Client) WaitForTask(ctx context.Context, taskID string, pollInterval, timeout time.Duration, downloadAudio bool) (*TaskResult, error) {
 	if pollInterval == 0 {
 		pollInterval = types.DefaultPollInterval

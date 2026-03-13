@@ -1,3 +1,7 @@
+// Package async provides client functionality for asynchronous speech recognition
+// using the SaluteSpeech API. It supports long-running recognition tasks,
+// task status polling, and result retrieval for processing large audio files
+// or batch recognition scenarios.
 package async
 
 import (
@@ -14,25 +18,32 @@ import (
 	"github.com/skiphead/salutespeech/types"
 )
 
-// Client handles async recognition
+// Client handles asynchronous speech recognition operations.
+// It manages task creation, result retrieval, and status polling
+// for long-running recognition jobs through the SaluteSpeech API.
 type Client struct {
 	httpClient *http.Client
-	baseURL    string
-	resultURL  string
+	baseURL    string // URL for creating recognition tasks
+	resultURL  string // URL for retrieving task results
 	tokenMgr   *client.TokenManager
 	logger     types.Logger
 }
 
-// Config represents recognition client configuration
+// Config represents the configuration options for creating a new async recognition client.
+// It allows customization of API endpoints, timeout behavior, TLS settings, and logging.
 type Config struct {
-	BaseURL       string
-	ResultURL     string
-	Timeout       time.Duration
-	AllowInsecure bool
-	Logger        types.Logger
+	BaseURL       string        // URL for task creation (defaults to DefaultRecognitionURL)
+	ResultURL     string        // URL for result retrieval (defaults to DefaultResultURL)
+	Timeout       time.Duration // HTTP client timeout (defaults to DefaultAPITimeout)
+	AllowInsecure bool          // When true, disables TLS certificate verification
+	Logger        types.Logger  // Logger instance for client operations
 }
 
-// NewClient creates new recognition client
+// NewClient creates a new asynchronous speech recognition client with the provided configuration.
+// It initializes the HTTP client, validates the token manager, and sets up default values
+// for any missing configuration parameters.
+//
+// Returns an error if token manager is nil or if configuration validation fails.
 func NewClient(tokenMgr *client.TokenManager, cfg Config) (*Client, error) {
 	if tokenMgr == nil {
 		return nil, types.ErrTokenManagerRequired
@@ -80,7 +91,12 @@ func NewClient(tokenMgr *client.TokenManager, cfg Config) (*Client, error) {
 	}, nil
 }
 
-// CreateTask creates async recognition task
+// CreateTask creates an asynchronous recognition task for audio processing.
+// It submits the recognition request with the provided audio file ID and options,
+// and returns a task response containing the task ID for subsequent result retrieval.
+//
+// Returns an error if request validation fails, authentication fails, or the API
+// returns an error response.
 func (c *Client) CreateTask(ctx context.Context, req *Request) (*Response, error) {
 	if req == nil {
 		return nil, types.ErrRequestNil
@@ -118,7 +134,12 @@ func (c *Client) CreateTask(ctx context.Context, req *Request) (*Response, error
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			return
+		}
+	}(resp.Body)
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -152,7 +173,12 @@ func (c *Client) CreateTask(ctx context.Context, req *Request) (*Response, error
 	}
 }
 
-// GetTaskResult gets recognition task result
+// GetTaskResult retrieves the result of an asynchronous recognition task.
+// It fetches the current status and recognition results for the specified task ID.
+// The task may still be processing, completed successfully, or failed with an error.
+//
+// Returns a TaskResult containing the task status, recognition results (if completed),
+// or error details (if failed).
 func (c *Client) GetTaskResult(ctx context.Context, taskID string) (*TaskResult, error) {
 	if taskID == "" {
 		return nil, types.ErrEmptyTaskID
@@ -177,7 +203,12 @@ func (c *Client) GetTaskResult(ctx context.Context, taskID string) (*TaskResult,
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			return
+		}
+	}(resp.Body)
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -193,7 +224,7 @@ func (c *Client) GetTaskResult(ctx context.Context, taskID string) (*TaskResult,
 		return nil, fmt.Errorf("parse result: %w", err)
 	}
 
-	// Map status to unified type
+	// Map status to unified type for consistent handling across the application
 	switch result.Status {
 	case "PROCESSING":
 		result.UnifiedStatus = types.StatusPROCESSING
@@ -210,7 +241,17 @@ func (c *Client) GetTaskResult(ctx context.Context, taskID string) (*TaskResult,
 	return &result, nil
 }
 
-// WaitForResult waits for task completion
+// WaitForResult polls the task status until completion, error, or timeout.
+// It periodically checks the task status at the specified poll interval
+// and returns when the task is completed successfully, fails, or the timeout is reached.
+//
+// Parameters:
+//   - ctx: Context for cancellation
+//   - taskID: The ID of the task to wait for
+//   - pollInterval: Time between status checks (defaults to DefaultPollInterval if zero)
+//   - timeout: Maximum time to wait for completion (defaults to DefaultWaitTimeout if zero)
+//
+// Returns the completed task result or an error if the task fails or timeout occurs.
 func (c *Client) WaitForResult(ctx context.Context, taskID string, pollInterval, timeout time.Duration) (*TaskResult, error) {
 	if pollInterval == 0 {
 		pollInterval = types.DefaultPollInterval
@@ -261,6 +302,9 @@ func (c *Client) WaitForResult(ctx context.Context, taskID string, pollInterval,
 	}
 }
 
+// validateOptions performs validation of recognition options and applies default values.
+// It checks required fields like audio encoding and sample rate, and sets defaults
+// for optional parameters like model, language, hypotheses count, and channels count.
 func (c *Client) validateOptions(opts *Options) error {
 	if opts.Model == "" {
 		opts.Model = ModelGeneral

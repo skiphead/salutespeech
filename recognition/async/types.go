@@ -1,100 +1,143 @@
+// Package async provides type definitions for asynchronous speech recognition operations.
+// It defines models, audio encodings, request/response structures, and result types
+// for long-running audio transcription tasks using the SaluteSpeech API.
 package async
 
 import (
 	"github.com/skiphead/salutespeech/types"
 )
 
-// RecognitionModel represents recognition model
+// Model represents the speech recognition model to use for transcription.
+// Different models are specialized for specific domains and vocabulary.
 type Model string
 
 const (
-	ModelGeneral  Model = "general"
-	ModelFinance  Model = "finance"
+	// ModelGeneral is a general-purpose model suitable for most conversational speech.
+	// Works well with everyday conversations, meetings, and general content.
+	ModelGeneral Model = "general"
+
+	// ModelFinance is optimized for financial domain vocabulary.
+	// Better recognition of financial terms, numbers, and industry-specific terminology.
+	ModelFinance Model = "finance"
+
+	// ModelMedicine is optimized for medical domain vocabulary.
+	// Improved accuracy for medical terminology, drug names, and clinical terms.
 	ModelMedicine Model = "medicine"
 )
 
-// AudioEncoding represents audio encoding format
+// AudioEncoding represents the encoding format of the input audio file.
+// The encoding must match the actual format of the uploaded audio.
 type AudioEncoding string
 
 const (
+	// EncodingPCM_S16LE represents raw PCM audio with signed 16-bit little-endian samples.
+	// This is the recommended format for optimal recognition accuracy.
 	EncodingPCM_S16LE AudioEncoding = "PCM_S16LE"
-	EncodingMP3       AudioEncoding = "MP3"
-	EncodingOGG_OPUS  AudioEncoding = "OGG_OPUS"
-	EncodingFLAC      AudioEncoding = "FLAC"
+
+	// EncodingMP3 represents MP3 compressed audio format.
+	// Widely supported but may have slightly lower accuracy than PCM.
+	EncodingMP3 AudioEncoding = "MP3"
+
+	// EncodingOGG_OPUS represents Ogg container with Opus codec.
+	// Excellent compression with good quality, suitable for network transmission.
+	EncodingOGG_OPUS AudioEncoding = "OGG_OPUS"
+
+	// EncodingFLAC represents FLAC (Free Lossless Audio Codec) format.
+	// Lossless compression that maintains original audio quality.
+	EncodingFLAC AudioEncoding = "FLAC"
 )
 
-// Hints represents recognition hints
+// Hints provides additional context to improve recognition accuracy.
+// These hints help the recognition engine better understand domain-specific terms.
 type Hints struct {
-	Words         []string `json:"words,omitempty"`
-	EnableLetters bool     `json:"enable_letters,omitempty"`
-	EOUTimeout    int      `json:"eou_timeout,omitempty"`
+	// Words is a list of domain-specific words or phrases to boost recognition.
+	Words []string `json:"words,omitempty"`
+
+	// EnableLetters enables recognition of individual letters (for spelling).
+	EnableLetters bool `json:"enable_letters,omitempty"`
+
+	// EOUTimeout sets the End-Of-Utterance timeout in milliseconds.
+	EOUTimeout int `json:"eou_timeout,omitempty"`
 }
 
-// SpeakerSeparationOptions represents speaker separation options
+// SpeakerSeparationOptions configures diarization (speaker separation) features.
+// Allows the recognition system to distinguish between different speakers.
 type SpeakerSeparationOptions struct {
-	Enable                bool `json:"enable,omitempty"`
+	// Enable enables speaker separation/diarization.
+	Enable bool `json:"enable,omitempty"`
+
+	// EnableOnlyMainSpeaker filters to only include the main speaker.
 	EnableOnlyMainSpeaker bool `json:"enable_only_main_speaker,omitempty"`
-	Count                 int  `json:"count,omitempty"`
+
+	// Count specifies the expected number of speakers.
+	Count int `json:"count,omitempty"`
 }
 
-// Options represents recognition options
+// Options represents the complete set of recognition parameters.
+// These options control how the audio is processed and what features are enabled.
 type Options struct {
-	Model                 Model                     `json:"model"`
-	AudioEncoding         AudioEncoding             `json:"audio_encoding"`
-	SampleRate            int                       `json:"sample_rate"`
-	Language              string                    `json:"language,omitempty"`
-	EnableProfanityFilter bool                      `json:"enable_profanity_filter,omitempty"`
-	HypothesesCount       int                       `json:"hypotheses_count,omitempty"`
-	NoSpeechTimeout       int                       `json:"no_speech_timeout,omitempty"`
-	MaxSpeechTimeout      int                       `json:"max_speech_timeout,omitempty"`
-	Hints                 *Hints                    `json:"hints,omitempty"`
-	ChannelsCount         int                       `json:"channels_count,omitempty"`
-	SpeakerSeparation     *SpeakerSeparationOptions `json:"speaker_separation_options,omitempty"`
-	InsightModels         []string                  `json:"insight_models,omitempty"`
+	Model                 Model                     `json:"model"`                                // Recognition model to use
+	AudioEncoding         AudioEncoding             `json:"audio_encoding"`                       // Format of input audio
+	SampleRate            int                       `json:"sample_rate"`                          // Sample rate in Hz
+	Language              string                    `json:"language,omitempty"`                   // Language code (e.g., "ru-RU")
+	EnableProfanityFilter bool                      `json:"enable_profanity_filter,omitempty"`    // Filter profanity from results
+	HypothesesCount       int                       `json:"hypotheses_count,omitempty"`           // Number of alternative transcriptions
+	NoSpeechTimeout       int                       `json:"no_speech_timeout,omitempty"`          // Timeout if no speech detected (ms)
+	MaxSpeechTimeout      int                       `json:"max_speech_timeout,omitempty"`         // Maximum speech segment duration (ms)
+	Hints                 *Hints                    `json:"hints,omitempty"`                      // Domain-specific hints
+	ChannelsCount         int                       `json:"channels_count,omitempty"`             // Number of audio channels
+	SpeakerSeparation     *SpeakerSeparationOptions `json:"speaker_separation_options,omitempty"` // Diarization settings
+	InsightModels         []string                  `json:"insight_models,omitempty"`             // Additional analysis models
 }
 
-// Request represents recognition request
+// Request represents an asynchronous recognition task creation request.
+// It combines recognition options with the uploaded audio file identifier.
 type Request struct {
-	Options       *Options `json:"options"`
-	RequestFileID string   `json:"request_file_id"`
+	Options       *Options `json:"options"`         // Recognition configuration
+	RequestFileID string   `json:"request_file_id"` // ID of uploaded audio file
 }
 
-// Result represents recognition task result
+// Result represents the metadata of a recognition task returned by the API.
+// Contains task identification and current status information.
 type Result struct {
-	ID        string           `json:"id"`
-	CreatedAt string           `json:"created_at"`
-	UpdatedAt string           `json:"updated_at"`
-	Status    types.TaskStatus `json:"status"`
+	ID        string           `json:"id"`         // Unique task identifier
+	CreatedAt string           `json:"created_at"` // Task creation timestamp (RFC3339)
+	UpdatedAt string           `json:"updated_at"` // Last update timestamp (RFC3339)
+	Status    types.TaskStatus `json:"status"`     // Current task status
 }
 
-// Response represents recognition API response
+// Response represents the API response for a recognition task creation request.
+// Wraps the task result with an HTTP status code.
 type Response struct {
-	Status int    `json:"status"`
-	Result Result `json:"result"`
+	Status int    `json:"status"` // HTTP status code
+	Result Result `json:"result"` // Task metadata
 }
 
-// Alternative represents recognition alternative
+// Alternative represents a single transcription alternative.
+// Multiple alternatives may be returned when HypothesesCount > 1.
 type Alternative struct {
-	Text       string  `json:"text"`
-	Confidence float64 `json:"confidence"`
-	Words      []Word  `json:"words,omitempty"`
+	Text       string  `json:"text"`            // Transcribed text
+	Confidence float64 `json:"confidence"`      // Confidence score (0-1)
+	Words      []Word  `json:"words,omitempty"` // Word-level details
 }
 
-// Word represents recognized word
+// Word represents detailed information about a single recognized word.
+// Includes timing information for alignment with audio.
 type Word struct {
-	Text       string  `json:"text"`
-	StartTime  float64 `json:"start_time"`
-	EndTime    float64 `json:"end_time"`
-	Confidence float64 `json:"confidence"`
+	Text       string  `json:"text"`       // Word text
+	StartTime  float64 `json:"start_time"` // Start time in seconds
+	EndTime    float64 `json:"end_time"`   // End time in seconds
+	Confidence float64 `json:"confidence"` // Word-level confidence score
 }
 
-// TaskResult represents complete recognition task result
+// TaskResult represents the complete result of a recognition task.
+// Contains transcribed text, metadata, and any error information.
 type TaskResult struct {
-	ID             string           `json:"id"`
-	Status         string           `json:"status"`
-	UnifiedStatus  types.TaskStatus `json:"-"`
-	Alternatives   []Alternative    `json:"alternatives,omitempty"`
-	ErrorCode      *string          `json:"error_code,omitempty"`
-	ErrorMessage   *string          `json:"error_message,omitempty"`
-	ResponseFileID string           `json:"response_file_id,omitempty"`
+	ID             string           `json:"id"`                         // Task identifier
+	Status         string           `json:"status"`                     // Raw status from API
+	UnifiedStatus  types.TaskStatus `json:"-"`                          // Normalized status for internal use
+	Alternatives   []Alternative    `json:"alternatives,omitempty"`     // Transcription alternatives
+	ErrorCode      *string          `json:"error_code,omitempty"`       // Error code if task failed
+	ErrorMessage   *string          `json:"error_message,omitempty"`    // Error details if task failed
+	ResponseFileID string           `json:"response_file_id,omitempty"` // ID for retrieving result
 }

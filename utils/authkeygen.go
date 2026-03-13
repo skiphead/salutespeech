@@ -5,8 +5,12 @@ import (
 	"fmt"
 )
 
-// GenerateBasicAuthKey encodes client credentials for HTTP Basic Auth.
-// Returns base64-encoded string of "clientID:clientSecret".
+// GenerateBasicAuthKey encodes client credentials for HTTP Basic Authentication.
+// It combines the provided clientID and clientSecret into a "clientID:clientSecret" format
+// and returns the result as a base64-encoded string suitable for use in HTTP Basic Auth headers.
+//
+// Returns an error if either clientID or clientSecret is empty.
+// The returned string can be used directly as the value in an "Authorization: Basic <encoded>" header.
 func GenerateBasicAuthKey(clientID, clientSecret string) (string, error) {
 	if clientID == "" {
 		return "", fmt.Errorf("clientID cannot be empty")

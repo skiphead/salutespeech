@@ -1,3 +1,6 @@
+// Package sync provides client functionality for synchronous speech synthesis
+// using the SaluteSpeech API. It supports real-time text-to-speech conversion
+// with multiple audio formats, voice options, and both plain text and SSML input.
 package sync
 
 import (
@@ -16,7 +19,9 @@ import (
 	"github.com/skiphead/salutespeech/utils"
 )
 
-// Client handles sync synthesis
+// Client handles synchronous speech synthesis operations.
+// It manages HTTP communication, authentication, and request validation
+// for real-time text-to-speech conversion through the SaluteSpeech API.
 type Client struct {
 	httpClient *http.Client
 	baseURL    string
@@ -24,15 +29,20 @@ type Client struct {
 	logger     types.Logger
 }
 
-// Config represents sync synthesis client configuration
+// Config represents the configuration options for creating a new sync synthesis client.
+// It allows customization of the API endpoint, timeout behavior, TLS settings, and logging.
 type Config struct {
-	BaseURL       string
-	Timeout       time.Duration
-	AllowInsecure bool
-	Logger        types.Logger
+	BaseURL       string        // API endpoint URL (defaults to DefaultSyncSynthesisURL)
+	Timeout       time.Duration // Request timeout (defaults to DefaultAPITimeout)
+	AllowInsecure bool          // When true, disables TLS certificate verification
+	Logger        types.Logger  // Logger instance for client operations
 }
 
-// NewClient creates new sync synthesis client
+// NewClient creates a new synchronous speech synthesis client with the provided configuration.
+// It initializes the HTTP client, validates the token manager, sanitizes the base URL,
+// and sets up default values for any missing configuration parameters.
+//
+// Returns an error if token manager is nil or if configuration validation fails.
 func NewClient(tokenMgr *client.TokenManager, cfg Config) (*Client, error) {
 	if tokenMgr == nil {
 		return nil, types.ErrTokenManagerRequired
@@ -75,7 +85,12 @@ func NewClient(tokenMgr *client.TokenManager, cfg Config) (*Client, error) {
 	}, nil
 }
 
-// Synthesize performs sync synthesis
+// Synthesize performs synchronous speech synthesis on the provided text.
+// It handles authentication, request construction, audio format negotiation,
+// and returns the synthesized audio data or an error if synthesis fails.
+//
+// The response includes the audio data, content type, and content length.
+// Audio formats supported include WAV, PCM, Opus, A-Law, and G.729.
 func (c *Client) Synthesize(ctx context.Context, req *Request) (*Response, error) {
 	if err := c.validateRequest(req); err != nil {
 		return nil, fmt.Errorf("invalid request: %w", err)
@@ -130,7 +145,12 @@ func (c *Client) Synthesize(ctx context.Context, req *Request) (*Response, error
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			c.logger.Warn("failed to close response body")
+		}
+	}(resp.Body)
 
 	audioData, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -160,7 +180,15 @@ func (c *Client) Synthesize(ctx context.Context, req *Request) (*Response, error
 	}
 }
 
-// SynthesizeText synthesizes plain text
+// SynthesizeText converts plain text to speech using synchronous synthesis.
+// It's a convenience method that wraps Synthesize with the appropriate content type.
+//
+// Parameters:
+//   - ctx: Context for cancellation and timeout
+//   - text: Plain text to synthesize (max length defined by types.MaxTextLength)
+//   - opts: Synthesis options including voice, format, and cache settings
+//
+// Returns synthesized audio response or an error if validation or synthesis fails.
 func (c *Client) SynthesizeText(ctx context.Context, text string, opts Options) (*Response, error) {
 	req := &Request{
 		Text:         text,
@@ -174,7 +202,16 @@ func (c *Client) SynthesizeText(ctx context.Context, text string, opts Options) 
 	return c.Synthesize(ctx, req)
 }
 
-// SynthesizeSSML synthesizes SSML text
+// SynthesizeSSML converts SSML (Speech Synthesis Markup Language) text to speech.
+// SSML allows fine-grained control over pronunciation, pitch, rate, and other
+// speech attributes. This method sets the appropriate content type for SSML input.
+//
+// Parameters:
+//   - ctx: Context for cancellation and timeout
+//   - ssml: SSML-formatted text to synthesize
+//   - opts: Synthesis options including voice, format, and cache settings
+//
+// Returns synthesized audio response or an error if validation or synthesis fails.
 func (c *Client) SynthesizeSSML(ctx context.Context, ssml string, opts Options) (*Response, error) {
 	req := &Request{
 		Text:         ssml,
@@ -188,6 +225,10 @@ func (c *Client) SynthesizeSSML(ctx context.Context, ssml string, opts Options) 
 	return c.Synthesize(ctx, req)
 }
 
+// validateRequest performs comprehensive validation of the synthesis request.
+// It checks for nil request, non-empty text, text length limits (using rune count),
+// valid content type, supported audio format, and applies default values
+// for missing optional parameters.
 func (c *Client) validateRequest(req *Request) error {
 	if req == nil {
 		return types.ErrRequestNil
