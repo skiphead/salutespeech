@@ -1,19 +1,45 @@
 package utils
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
 )
 
-// WriteFileAtomic writes data to file atomically
+// WriteFileAtomic writes data to file atomically using temp file + rename.
+// Guarantees that the target file is either fully written or unchanged.
+// Note: Atomicity is guaranteed only when source and destination are on the same filesystem.
 func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, perm); err != nil {
-		return err
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("mkdir failed: %w", err)
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
-		return err
+
+	dir := filepath.Dir(path)
+	prefix := "." + filepath.Base(path) + ".tmp."
+
+	tmpFile, err := os.CreateTemp(dir, prefix)
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
 	}
+	tmpName := tmpFile.Name()
+	defer os.Remove(tmpName) // Безопасная очистка
+
+	if _, err := tmpFile.Write(data); err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("write temp file: %w", err)
+	}
+	if err := tmpFile.Chmod(perm); err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("chmod temp file: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("close temp file: %w", err)
+	}
+
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("rename: %w", err)
+	}
+	// Файл успешно переименован — defer не удалит его
 	return nil
 }
 

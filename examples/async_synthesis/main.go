@@ -14,9 +14,10 @@ import (
 )
 
 func main() {
+	authKey := client.GenerateBasicAuthKey("client_id", "client_secret")
 	// Create OAuth client
 	oauthClient, err := client.NewOAuthClient(client.Config{
-		AuthKey: "base64(client_id:client_secret)", // Replace with your credentials
+		AuthKey: authKey,
 		Scope:   types.ScopeSaluteSpeechPers,
 		Timeout: 30 * time.Second,
 	})
