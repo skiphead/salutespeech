@@ -1,7 +1,6 @@
 # SaluteSpeech Go Client
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/yourusername/salutespeech.svg)](https://pkg.go.dev/github.com/yourusername/salutespeech)
-[![Go Report Card](https://goreportcard.com/badge/github.com/yourusername/salutespeech)](https://goreportcard.com/report/github.com/yourusername/salutespeech)
+[![Go Reference](https://pkg.go.dev/badge/github.com/skiphead/salutespeech.svg)](https://pkg.go.dev/github.com/yourusername/salutespeech)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Production-ready Go client for [SaluteSpeech API](https://developers.sber.ru/docs/ru/salutespeech/overview) by Sber.
@@ -20,7 +19,7 @@ Production-ready Go client for [SaluteSpeech API](https://developers.sber.ru/doc
 ## Installation
 
 ```bash
-go get github.com/yourusername/salutespeech
+go get github.com/skiphead/salutespeech
 ```
 
 ## Quick Start
