@@ -4,8 +4,9 @@ Package salutespeech provides a comprehensive Go client for SaluteSpeech API by 
 Basic usage:
 
 	// Create OAuth client
+	authKey := salutespeech.GenerateBasicAuthKey("client_id", "client_secret")
 	client, err := salutespeech.NewClient(salutespeech.Config{
-	    AuthKey: "base64(client_id:client_secret)",
+	    AuthKey: authKey, // or Authorization Key
 	    Scope:   salutespeech.ScopeSaluteSpeechPers,
 	})
 
