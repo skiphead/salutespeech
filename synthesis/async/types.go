@@ -12,10 +12,26 @@ import (
 type Encoding string
 
 const (
+	// EncodingWAV16 represents WAV format with 16-bit depth and 16kHz sampling rate.
+	// Provides high quality with wide compatibility.
+	EncodingWAV16 Encoding = "wav16"
+
+	// EncodingPCM16 represents raw PCM format with 16-bit depth and 16kHz sampling rate.
+	// Minimal processing overhead, suitable for streaming.
+	EncodingPCM16 Encoding = "pcm16"
+
 	// EncodingOpus represents Opus audio encoding in Ogg container.
 	// Opus provides excellent compression while maintaining high audio quality,
 	// making it ideal for network transmission and storage.
-	EncodingOpus Encoding = "Opus"
+	EncodingOpus Encoding = "opus"
+
+	// EncodingALaw represents A-law encoded audio.
+	// Standard telephony format, 8-bit depth at 8kHz sampling rate.
+	EncodingALaw Encoding = "alaw"
+
+	// EncodingG729 represents G.729 compressed audio format.
+	// Very high compression ratio, commonly used in VoIP applications.
+	EncodingG729 Encoding = "g729"
 )
 
 // Request represents an asynchronous speech synthesis task creation request.
@@ -47,6 +63,8 @@ type Result struct {
 
 	// Status indicates the current state of the task (NEW, PROCESSING, DONE, ERROR, CANCELED).
 	Status types.TaskStatus `json:"status"`
+	// ResponseFileId object id
+	ResponseFileId string `json:"response_file_id"`
 }
 
 // Response represents the API response for a synthesis task creation request.

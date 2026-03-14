@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/skiphead/salutespeech/client"
@@ -56,7 +57,7 @@ func NewClient(tokenMgr *client.TokenManager, cfg Config) (*Client, error) {
 
 	baseURL := cfg.BaseURL
 	if baseURL == "" {
-		baseURL = types.DefaultRecognitionURL
+		baseURL = types.DefaultBaseURL
 	}
 
 	resultURL := cfg.ResultURL
@@ -121,7 +122,9 @@ func (c *Client) CreateTask(ctx context.Context, req *Request) (*Response, error
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL, bytes.NewReader(body))
+	url := fmt.Sprintf("%s%s", c.baseURL, "speech:async_recognize")
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -188,8 +191,8 @@ func (c *Client) GetTaskResult(ctx context.Context, taskID string) (*TaskResult,
 	if err != nil {
 		return nil, fmt.Errorf("get auth token: %w", err)
 	}
-
-	url := fmt.Sprintf("%s?id=%s", c.resultURL, taskID)
+	//task:get
+	url := fmt.Sprintf("%stask:get?id=%s", c.baseURL, taskID)
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -222,20 +225,6 @@ func (c *Client) GetTaskResult(ctx context.Context, taskID string) (*TaskResult,
 	var result TaskResult
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("parse result: %w", err)
-	}
-
-	// Map status to unified type for consistent handling across the application
-	switch result.Status {
-	case "PROCESSING":
-		result.UnifiedStatus = types.StatusPROCESSING
-	case "DONE":
-		result.UnifiedStatus = types.StatusDONE
-	case "ERROR":
-		result.UnifiedStatus = types.StatusERROR
-	case "NEW":
-		result.UnifiedStatus = types.StatusNEW
-	default:
-		result.UnifiedStatus = types.TaskStatus(result.Status)
 	}
 
 	return &result, nil
@@ -277,29 +266,119 @@ func (c *Client) WaitForResult(ctx context.Context, taskID string, pollInterval,
 				return nil, err
 			}
 
-			switch result.UnifiedStatus {
-			case types.StatusDONE:
+			switch result.Result.Status {
+			case string(types.StatusDONE):
 				return result, nil
-			case types.StatusERROR:
-				msg := "unknown error"
-				if result.ErrorMessage != nil {
-					msg = *result.ErrorMessage
-				}
-				return nil, fmt.Errorf("task failed [%s]: %s",
-					func() string {
-						if result.ErrorCode != nil {
-							return *result.ErrorCode
-						}
-						return "ERROR"
-					}(),
-					msg)
-			case types.StatusNEW, types.StatusPROCESSING:
+			case string(types.StatusERROR):
+				return nil, fmt.Errorf("task failed")
+
+			case string(types.StatusNEW), string(types.StatusPROCESSING):
 				continue
 			default:
-				return nil, fmt.Errorf("unknown task status: %s", result.UnifiedStatus)
+				return nil, fmt.Errorf("unknown task status: %s", result.Result.Status)
 			}
 		}
 	}
+}
+
+// DownloadTaskResultToFile downloads the actual result file for a completed task and saves it to disk.
+// Uses endpoint: /data:download?response_file_id={taskId}
+// Note: The task ID is used as the response_file_id parameter
+func (c *Client) DownloadTaskResultToFile(ctx context.Context, responseFileID, outputPath string) error {
+	if responseFileID == "" {
+		return types.ErrEmptyTaskID
+	}
+
+	authHeader, err := c.tokenMgr.GetTokenWithHeader(ctx)
+	if err != nil {
+		return fmt.Errorf("get auth token: %w", err)
+	}
+
+	// Construct proper URL for result download
+	// The task ID becomes the response_file_id parameter
+	url := fmt.Sprintf("%sdata:download?response_file_id=%s", c.baseURL, responseFileID)
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	httpReq.Header.Set("Accept", "application/octet-stream")
+	httpReq.Header.Set("Authorization", authHeader)
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Проверяем статус ответа
+	if resp.StatusCode != http.StatusOK {
+		// Пытаемся прочитать тело ошибки для диагностики
+		errorBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to download file (status %d): %s", resp.StatusCode, string(errorBody))
+	}
+
+	// Создаем выходной файл
+	outFile, err := os.Create(outputPath)
+	if err != nil {
+		return fmt.Errorf("failed to create output file: %w", err)
+	}
+	defer outFile.Close()
+
+	// Копируем данные из response body в файл
+	_, err = io.Copy(outFile, resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to save file: %w", err)
+	}
+
+	return nil
+}
+
+func (c *Client) DownloadTaskResult(ctx context.Context, responseFileID string) ([]byte, error) {
+	if responseFileID == "" {
+		return nil, types.ErrEmptyTaskID
+	}
+
+	authHeader, err := c.tokenMgr.GetTokenWithHeader(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get auth token: %w", err)
+	}
+
+	// Construct proper URL for result download
+	// The task ID becomes the response_file_id parameter
+	url := fmt.Sprintf("%sdata:download?response_file_id=%s", c.baseURL, responseFileID)
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	httpReq.Header.Set("Accept", "application/octet-stream")
+	httpReq.Header.Set("Authorization", authHeader)
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer func(Body io.ReadCloser) {
+		err = Body.Close()
+		if err != nil {
+			c.logger.Warn("close response body error:", err)
+		}
+	}(resp.Body)
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to get result (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	return body, nil
+
 }
 
 // validateOptions performs validation of recognition options and applies default values.

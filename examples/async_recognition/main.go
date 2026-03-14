@@ -1,6 +1,7 @@
 // Package main provides an example of using the SaluteSpeech API client library
 // for asynchronous speech recognition. It demonstrates the complete workflow:
-// authentication, file upload, task creation, and result retrieval.
+// authentication, file upload with automatic format detection, task creation,
+// result retrieval, and downloading the transcribed text.
 package main
 
 import (
@@ -13,6 +14,7 @@ import (
 	"github.com/skiphead/salutespeech/recognition/async"
 	"github.com/skiphead/salutespeech/types"
 	"github.com/skiphead/salutespeech/upload"
+	"github.com/skiphead/salutespeech/utils"
 )
 
 func main() {
@@ -24,7 +26,7 @@ func main() {
 	// The OAuth client handles the authentication flow and token retrieval
 	oauthClient, err := client.NewOAuthClient(client.Config{
 		AuthKey: authKey,                     // Base64-encoded client credentials
-		Scope:   types.ScopeSaluteSpeechPers, // API access scope
+		Scope:   types.ScopeSaluteSpeechPers, // API access scope for speech recognition
 		Timeout: 30 * time.Second,            // HTTP client timeout
 	})
 	if err != nil {
@@ -35,37 +37,47 @@ func main() {
 	// The token manager handles token caching, refresh, and provides valid tokens for API requests
 	tokenMgr := client.NewTokenManager(oauthClient, client.TokenManagerConfig{})
 
-	// Upload audio file to SaluteSpeech storage
-	// Files must be uploaded before they can be processed by async recognition
+	// Initialize upload client for file uploads
+	// Files must be uploaded to SaluteSpeech storage before async processing
 	uploadClient, err := upload.NewClient(tokenMgr, upload.Config{})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// Upload audio file from local filesystem
-	// The file should be in PCM 16kHz 16-bit format (mono) for optimal recognition
-	uploadResp, err := uploadClient.UploadFromFile(context.Background(), "audio.wav",
-		types.ContentAudioPCM16k16bit)
+	// Specify path to audio file for recognition
+	pathAudioFile := "tests/audio.ogg"
+
+	// Automatically detect audio format by reading file header and extension
+	// This utility function determines the correct content type for the API
+	audioType, detectErr := utils.DetectAudioContentType(pathAudioFile)
+	if detectErr != nil {
+		log.Fatal(detectErr)
+	}
+
+	// Upload audio file to SaluteSpeech storage
+	// The detected content type ensures proper format specification
+	uploadResp, err := uploadClient.UploadFromFile(context.Background(), pathAudioFile,
+		audioType)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// Create asynchronous recognition task
-	// The recognition client handles task creation and status polling
+	// Create asynchronous recognition client
+	// This client handles task creation, status polling, and result retrieval
 	recClient, err := async.NewClient(tokenMgr, async.Config{})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// Configure recognition options
-	// These parameters control the speech recognition behavior
+	// Configure recognition options for the audio file
+	// Note: AudioEncoding must match the actual format of the uploaded file (OGG_OPUS)
 	req := &async.Request{
-		RequestFileID: uploadResp.Result.RequestFileID, // ID of uploaded audio file
+		RequestFileID: uploadResp.Result.RequestFileID, // ID from upload response
 		Options: &async.Options{
-			AudioEncoding: async.EncodingPCM_S16LE, // Audio encoding format
-			SampleRate:    16000,                   // Audio sample rate in Hz
-			Model:         async.ModelGeneral,      // Recognition model to use
-			Language:      "ru-RU",                 // Language of the audio
+			AudioEncoding: async.EncodingOGG_OPUS, // Must match the actual audio format
+			SampleRate:    16000,                  // Audio sample rate in Hz
+			Model:         async.ModelGeneral,     // General-purpose recognition model
+			Language:      "ru-RU",                // Russian language
 		},
 	}
 
@@ -79,14 +91,22 @@ func main() {
 	fmt.Printf("Task created: %s\n", resp.Result.ID)
 
 	// Wait for recognition task completion
-	// Polls task status until completion, error, or timeout
-	// Parameters: poll interval (2s) and maximum wait time (5min)
+	// Polls task status every 2 seconds with a 5-minute timeout
 	result, err := recClient.WaitForResult(context.Background(), resp.Result.ID, 2*time.Second, 5*time.Minute)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// Display recognition results
-	// Alternatives contain transcribed text with confidence scores
-	fmt.Printf("Recognition result: %+v\n", result.Alternatives)
+	fmt.Printf("Recognition result file ID: %+v\n", result.Result.ResponseFileId)
+
+	// Create another client instance for downloading the result
+	// (In practice, you could reuse the existing client)
+	downloadTextFile, _ := async.NewClient(tokenMgr, async.Config{})
+
+	// Download the transcribed text to a local file
+	// The result contains the recognized text in JSON format
+	err = downloadTextFile.DownloadTaskResultToFile(context.Background(), result.Result.ResponseFileId, "./test.txt")
+	if err != nil {
+		fmt.Println(err)
+	}
 }

@@ -4,12 +4,12 @@ import "time"
 
 // Default URLs
 const (
+	DefaultBaseURL            = "https://smartspeech.sber.ru/rest/v1/"
 	DefaultOAuthURL           = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
 	DefaultUploadURL          = "https://smartspeech.sber.ru/rest/v1/data:upload"
 	DefaultSynthesizeURL      = "https://smartspeech.sber.ru/rest/v1/text:async_synthesize"
 	DefaultTaskURL            = "https://smartspeech.sber.ru/rest/v1/task:get"
 	DefaultDownloadURL        = "https://smartspeech.sber.ru/rest/v1/data:download"
-	DefaultRecognitionURL     = "https://smartspeech.sber.ru/rest/v1/speech:async_recognize"
 	DefaultResultURL          = "https://smartspeech.sber.ru/rest/v1/speech:recognition_result"
 	DefaultSyncRecognitionURL = "https://smartspeech.sber.ru/rest/v1/speech:recognize"
 	DefaultSyncSynthesisURL   = "https://smartspeech.sber.ru/rest/v1/text:synthesize"

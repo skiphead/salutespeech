@@ -4,6 +4,8 @@
 package async
 
 import (
+	"time"
+
 	"github.com/skiphead/salutespeech/types"
 )
 
@@ -40,11 +42,27 @@ const (
 
 	// EncodingOGG_OPUS represents Ogg container with Opus codec.
 	// Excellent compression with good quality, suitable for network transmission.
-	EncodingOGG_OPUS AudioEncoding = "OGG_OPUS"
+	EncodingOGG_OPUS AudioEncoding = "opus"
 
 	// EncodingFLAC represents FLAC (Free Lossless Audio Codec) format.
 	// Lossless compression that maintains original audio quality.
 	EncodingFLAC AudioEncoding = "FLAC"
+
+	// FormatWAV16 represents WAV format with 16-bit depth and 16kHz sampling rate.
+	// Provides high quality with wide compatibility.
+	FormatWAV16 AudioEncoding = "wav16"
+
+	// FormatPCM16 represents raw PCM format with 16-bit depth and 16kHz sampling rate.
+	// Minimal processing overhead, suitable for streaming.
+	FormatPCM16 AudioEncoding = "pcm16"
+
+	// FormatALaw represents A-law encoded audio.
+	// Standard telephony format, 8-bit depth at 8kHz sampling rate.
+	FormatALaw AudioEncoding = "alaw"
+
+	// FormatG729 represents G.729 compressed audio format.
+	// Very high compression ratio, commonly used in VoIP applications.
+	FormatG729 AudioEncoding = "g729"
 )
 
 // Hints provides additional context to improve recognition accuracy.
@@ -133,11 +151,105 @@ type Word struct {
 // TaskResult represents the complete result of a recognition task.
 // Contains transcribed text, metadata, and any error information.
 type TaskResult struct {
-	ID             string           `json:"id"`                         // Task identifier
-	Status         string           `json:"status"`                     // Raw status from API
-	UnifiedStatus  types.TaskStatus `json:"-"`                          // Normalized status for internal use
-	Alternatives   []Alternative    `json:"alternatives,omitempty"`     // Transcription alternatives
-	ErrorCode      *string          `json:"error_code,omitempty"`       // Error code if task failed
-	ErrorMessage   *string          `json:"error_message,omitempty"`    // Error details if task failed
-	ResponseFileID string           `json:"response_file_id,omitempty"` // ID for retrieving result
+	Status int `json:"status"`
+	Result struct {
+		Id             string    `json:"id"`
+		CreatedAt      time.Time `json:"created_at"`
+		UpdatedAt      time.Time `json:"updated_at"`
+		Status         string    `json:"status"`
+		ResponseFileId string    `json:"response_file_id"`
+	} `json:"result"`
+}
+
+// Определяем структуры для сериализации
+type DownloadFileResponse struct {
+	Results             []DownloadFileResult `json:"results"`
+	Eou                 bool                 `json:"eou"`
+	EmotionsResult      EmotionsResult       `json:"emotions_result"`
+	ProcessedAudioStart string               `json:"processed_audio_start"`
+	ProcessedAudioEnd   string               `json:"processed_audio_end"`
+	BackendInfo         BackendInfo          `json:"backend_info"`
+	Channel             int                  `json:"channel"`
+	SpeakerInfo         SpeakerInfo          `json:"speaker_info"`
+	EouReason           string               `json:"eou_reason"`
+	Insight             string               `json:"insight"`
+	PersonIdentity      PersonIdentity       `json:"person_identity"`
+}
+
+type DownloadFileResult struct {
+	Text           string          `json:"text"`
+	NormalizedText string          `json:"normalized_text"`
+	Start          string          `json:"start"`
+	End            string          `json:"end"`
+	WordAlignments []WordAlignment `json:"word_alignments"`
+}
+
+type WordAlignment struct {
+	Word  string `json:"word"`
+	Start string `json:"start"`
+	End   string `json:"end"`
+}
+
+type EmotionsResult struct {
+	Positive float64 `json:"positive"`
+	Neutral  float64 `json:"neutral"`
+	Negative float64 `json:"negative"`
+}
+
+type BackendInfo struct {
+	ModelName     string `json:"model_name"`
+	ModelVersion  string `json:"model_version"`
+	ServerVersion string `json:"server_version"`
+}
+
+type SpeakerInfo struct {
+	SpeakerID             int `json:"speaker_id"`
+	MainSpeakerConfidence int `json:"main_speaker_confidence"`
+}
+
+type PersonIdentity struct {
+	Age         string `json:"age"`
+	Gender      string `json:"gender"`
+	AgeScore    int    `json:"age_score"`
+	GenderScore int    `json:"gender_score"`
+}
+
+type T struct {
+	Results []struct {
+		Text           string `json:"text"`
+		NormalizedText string `json:"normalized_text"`
+		Start          string `json:"start"`
+		End            string `json:"end"`
+		WordAlignments []struct {
+			Word  string `json:"word"`
+			Start string `json:"start"`
+			End   string `json:"end"`
+		} `json:"word_alignments"`
+	} `json:"results"`
+	Eou            bool `json:"eou"`
+	EmotionsResult struct {
+		Positive float64 `json:"positive"`
+		Neutral  float64 `json:"neutral"`
+		Negative float64 `json:"negative"`
+	} `json:"emotions_result"`
+	ProcessedAudioStart string `json:"processed_audio_start"`
+	ProcessedAudioEnd   string `json:"processed_audio_end"`
+	BackendInfo         struct {
+		ModelName     string `json:"model_name"`
+		ModelVersion  string `json:"model_version"`
+		ServerVersion string `json:"server_version"`
+	} `json:"backend_info"`
+	Channel     int `json:"channel"`
+	SpeakerInfo struct {
+		SpeakerId             int `json:"speaker_id"`
+		MainSpeakerConfidence int `json:"main_speaker_confidence"`
+	} `json:"speaker_info"`
+	EouReason      string `json:"eou_reason"`
+	Insight        string `json:"insight"`
+	PersonIdentity struct {
+		Age         string `json:"age"`
+		Gender      string `json:"gender"`
+		AgeScore    int    `json:"age_score"`
+		GenderScore int    `json:"gender_score"`
+	} `json:"person_identity"`
 }

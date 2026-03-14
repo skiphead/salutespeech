@@ -138,7 +138,7 @@ func (c *Client) CreateTask(ctx context.Context, req *Request) (*Response, error
 			c.logger.Warn("failed to close response body")
 		}
 	}(resp.Body)
-
+	fmt.Println(resp)
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
@@ -161,7 +161,7 @@ func (c *Client) CreateTask(ctx context.Context, req *Request) (*Response, error
 // GetTaskStatus retrieves the current status of an asynchronous synthesis task.
 // It returns a task status response containing information about the task's progress,
 // including whether it's pending, processing, completed, or failed.
-func (c *Client) GetTaskStatus(ctx context.Context, taskID string) (*types.TaskStatusResponse, error) {
+func (c *Client) GetTaskStatus(ctx context.Context, taskID string) (*Response, error) {
 	authHeader, err := c.tokenMgr.GetTokenWithHeader(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get token: %w", err)
@@ -199,7 +199,7 @@ func (c *Client) GetTaskStatus(ctx context.Context, taskID string) (*types.TaskS
 		return nil, fmt.Errorf("status error %d: %s", resp.StatusCode, string(body))
 	}
 
-	var statusResp types.TaskStatusResponse
+	var statusResp Response
 	if err := json.Unmarshal(body, &statusResp); err != nil {
 		return nil, fmt.Errorf("parse status: %w", err)
 	}
@@ -298,15 +298,16 @@ func (c *Client) WaitForTask(ctx context.Context, taskID string, pollInterval, t
 					return result, nil
 				}
 
-				audio, err := c.DownloadResult(ctxWithTimeout, status.Result.ID)
+				audio, err := c.DownloadResult(ctxWithTimeout, status.Result.ResponseFileId)
 				if err != nil {
 					return result, fmt.Errorf("download audio: %w", err)
 				}
+
 				result.AudioData = audio
 				return result, nil
 
 			case types.StatusERROR:
-				return nil, fmt.Errorf("task failed: unknown error")
+				return nil, fmt.Errorf("task failed: response %s", status.Result.Status)
 			case types.StatusCANCELED:
 				return nil, fmt.Errorf("task canceled")
 			}

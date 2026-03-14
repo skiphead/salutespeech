@@ -16,17 +16,18 @@ import (
 	"github.com/skiphead/salutespeech/upload"
 )
 
+const savePath = "output.opus"
+
 func main() {
 	// Generate Basic Authentication credentials from client ID and secret
 	// These credentials are used to obtain OAuth tokens from the SaluteSpeech API
 	authKey := client.GenerateBasicAuthKey("client_id", "client_secret")
 
-	// Create OAuth client for token management
-	// The OAuth client handles the authentication flow and token retrieval
+	// Create OAuth client
 	oauthClient, err := client.NewOAuthClient(client.Config{
-		AuthKey: authKey,                     // Base64-encoded client credentials
-		Scope:   types.ScopeSaluteSpeechPers, // API access scope for speech synthesis
-		Timeout: 30 * time.Second,            // HTTP client timeout
+		AuthKey: authKey,
+		Scope:   types.ScopeSaluteSpeechPers,
+		Timeout: 30 * time.Second,
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -43,8 +44,14 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Prepare text for synthesis
-	text := "Привет, мир! Это тестовый синтез речи." // "Hello, world! This is a test speech synthesis."
+	// Prepare text for synthesis min size 400 bytes
+	text := `Через сто лет человечество, вероятно, достигнет технологической сингулярности. 
+             Искусственный интеллект превзойдет человека, но станет ли он нашим партнером или конкурентом? 
+             Медицина победит старение, превратив 120 лет в новый средний возраст. 
+             Люди колонизируют Луну и Марс, а энергия термоядерного синтеза решит проблему ресурсов.
+             Однако главный вопрос останется этическим: сохраним ли мы человечность в мире киборгов и цифрового бессмертия? 
+             Сотрем ли границы между реальностью и виртуальностью? 
+             Возможно, наши потомки будут с ностальгией вспоминать XXI век как время простых радостей и неразгаданных тайн.`
 	textFile := "text.txt"
 
 	// Create temporary text file
@@ -102,7 +109,7 @@ func main() {
 
 	// Save synthesized audio to file
 	// The audio format matches the requested EncodingOpus
-	if err := os.WriteFile("output.opus", result.AudioData, 0644); err != nil {
+	if err := os.WriteFile(savePath, result.AudioData, 0644); err != nil {
 		log.Fatal(err)
 	}
 
