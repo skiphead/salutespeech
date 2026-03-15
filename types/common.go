@@ -24,6 +24,7 @@ const (
 	ScopeSaluteSpeechCorp Scope = "SALUTE_SPEECH_CORP"
 	ScopeSaluteSpeechB2B  Scope = "SALUTE_SPEECH_B2B"
 	ScopeSberSpeech       Scope = "SBER_SPEECH"
+	ScopeGigaChatAPIPers  Scope = "GIGACHAT_API_PERS"
 )
 
 // Voice represents synthesis voice
