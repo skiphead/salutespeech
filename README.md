@@ -3,7 +3,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/skiphead/salutespeech.svg)](https://pkg.go.dev/github.com/skiphead/salutespeech)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Production-ready Go client for [SaluteSpeech API](https://developers.sber.ru/docs/ru/salutespeech/overview) by Sber.
+Production-ready Go client for [SaluteSpeech API](https://developers.sber.ru/docs/ru/salutespeech/overview).
 
 ## Features
 
