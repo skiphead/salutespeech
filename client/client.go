@@ -7,6 +7,7 @@ import (
 // Client is the main client interface
 type Client interface {
 	GetTokenManager() *TokenManager
+	Client() *OAuthClient
 }
 
 // SaluteSpeechClient implements Client interface
@@ -37,4 +38,8 @@ func NewSaluteSpeechClient(cfg Config) (*SaluteSpeechClient, error) {
 // GetTokenManager returns token manager
 func (c *SaluteSpeechClient) GetTokenManager() *TokenManager {
 	return c.tokenMgr
+}
+
+func (c *SaluteSpeechClient) Client() *OAuthClient {
+	return c.oauthClient
 }

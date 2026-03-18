@@ -19,10 +19,16 @@ import (
 	"github.com/skiphead/salutespeech/utils"
 )
 
-// Client handles synchronous speech synthesis operations.
+type Client interface {
+	Synthesize(ctx context.Context, req *Request) (*Response, error)
+	SynthesizeText(ctx context.Context, text string, opts Options) (*Response, error)
+	SynthesizeSSML(ctx context.Context, ssml string, opts Options) (*Response, error)
+}
+
+// syncClient handles synchronous speech synthesis operations.
 // It manages HTTP communication, authentication, and request validation
 // for real-time text-to-speech conversion through the SaluteSpeech API.
-type Client struct {
+type syncClient struct {
 	httpClient *http.Client
 	baseURL    string
 	tokenMgr   *client.TokenManager
@@ -43,7 +49,7 @@ type Config struct {
 // and sets up default values for any missing configuration parameters.
 //
 // Returns an error if token manager is nil or if configuration validation fails.
-func NewClient(tokenMgr *client.TokenManager, cfg Config) (*Client, error) {
+func NewClient(tokenMgr *client.TokenManager, cfg Config) (Client, error) {
 	if tokenMgr == nil {
 		return nil, types.ErrTokenManagerRequired
 	}
@@ -77,7 +83,7 @@ func NewClient(tokenMgr *client.TokenManager, cfg Config) (*Client, error) {
 		Timeout:   timeout,
 	}
 
-	return &Client{
+	return &syncClient{
 		httpClient: httpClient,
 		baseURL:    baseURL,
 		tokenMgr:   tokenMgr,
@@ -91,7 +97,7 @@ func NewClient(tokenMgr *client.TokenManager, cfg Config) (*Client, error) {
 //
 // The response includes the audio data, content type, and content length.
 // Audio formats supported include WAV, PCM, Opus, A-Law, and G.729.
-func (c *Client) Synthesize(ctx context.Context, req *Request) (*Response, error) {
+func (c *syncClient) Synthesize(ctx context.Context, req *Request) (*Response, error) {
 	if err := c.validateRequest(req); err != nil {
 		return nil, fmt.Errorf("invalid request: %w", err)
 	}
@@ -189,7 +195,7 @@ func (c *Client) Synthesize(ctx context.Context, req *Request) (*Response, error
 //   - opts: Synthesis options including voice, format, and cache settings
 //
 // Returns synthesized audio response or an error if validation or synthesis fails.
-func (c *Client) SynthesizeText(ctx context.Context, text string, opts Options) (*Response, error) {
+func (c *syncClient) SynthesizeText(ctx context.Context, text string, opts Options) (*Response, error) {
 	req := &Request{
 		Text:         text,
 		ContentType:  ContentTypeText,
@@ -212,7 +218,7 @@ func (c *Client) SynthesizeText(ctx context.Context, text string, opts Options) 
 //   - opts: Synthesis options including voice, format, and cache settings
 //
 // Returns synthesized audio response or an error if validation or synthesis fails.
-func (c *Client) SynthesizeSSML(ctx context.Context, ssml string, opts Options) (*Response, error) {
+func (c *syncClient) SynthesizeSSML(ctx context.Context, ssml string, opts Options) (*Response, error) {
 	req := &Request{
 		Text:         ssml,
 		ContentType:  ContentTypeSSML,
@@ -229,7 +235,7 @@ func (c *Client) SynthesizeSSML(ctx context.Context, ssml string, opts Options) 
 // It checks for nil request, non-empty text, text length limits (using rune count),
 // valid content type, supported audio format, and applies default values
 // for missing optional parameters.
-func (c *Client) validateRequest(req *Request) error {
+func (c *syncClient) validateRequest(req *Request) error {
 	if req == nil {
 		return types.ErrRequestNil
 	}

@@ -9,46 +9,27 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/skiphead/salutespeech/client"
 	"github.com/skiphead/salutespeech/types"
 )
 
-// UploadResponse represents upload API response
-type UploadResponse struct {
-	Status int `json:"status"`
-	Result struct {
-		RequestFileID string `json:"request_file_id"`
-	} `json:"result"`
+type Upload interface {
+	Upload(ctx context.Context, req *Request) (*Response, error)
+	UploadFromFile(ctx context.Context, path string, ct types.ContentType) (*Response, error)
 }
 
-// UploadRequest represents upload request
-type UploadRequest struct {
-	Data        []byte
-	ContentType types.ContentType
-	RequestID   string
-}
-
-// Client handles file uploads
-type Client struct {
+// uploadClient handles file uploads
+type uploadClient struct {
 	httpClient *http.Client
 	baseURL    string
 	tokenMgr   *client.TokenManager
 	logger     types.Logger
 }
 
-// Config represents upload client configuration
-type Config struct {
-	BaseURL       string
-	AllowInsecure bool
-	Timeout       time.Duration
-	Logger        types.Logger
-}
-
 // NewClient creates new upload client
-func NewClient(tokenMgr *client.TokenManager, cfg Config) (*Client, error) {
+func NewClient(tokenMgr *client.TokenManager, cfg Config) (Upload, error) {
 	if tokenMgr == nil {
 		return nil, types.ErrTokenManagerRequired
 	}
@@ -81,7 +62,7 @@ func NewClient(tokenMgr *client.TokenManager, cfg Config) (*Client, error) {
 		Timeout:   timeout,
 	}
 
-	return &Client{
+	return &uploadClient{
 		httpClient: httpClient,
 		baseURL:    url,
 		tokenMgr:   tokenMgr,
@@ -90,7 +71,7 @@ func NewClient(tokenMgr *client.TokenManager, cfg Config) (*Client, error) {
 }
 
 // UploadFromFile uploads file from local path
-func (c *Client) UploadFromFile(ctx context.Context, path string, ct types.ContentType) (*UploadResponse, error) {
+func (c *uploadClient) UploadFromFile(ctx context.Context, path string, ct types.ContentType) (*Response, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read file: %w", err)
@@ -104,14 +85,14 @@ func (c *Client) UploadFromFile(ctx context.Context, path string, ct types.Conte
 		return nil, fmt.Errorf("%w: %s", types.ErrInvalidContentType, ct)
 	}
 
-	return c.Upload(ctx, &UploadRequest{
+	return c.Upload(ctx, &Request{
 		Data:        data,
 		ContentType: ct,
 	})
 }
 
 // Upload uploads file data
-func (c *Client) Upload(ctx context.Context, req *UploadRequest) (*UploadResponse, error) {
+func (c *uploadClient) Upload(ctx context.Context, req *Request) (*Response, error) {
 	if req == nil || len(req.Data) == 0 {
 		return nil, types.ErrEmptyFileData
 	}
@@ -159,7 +140,7 @@ func (c *Client) Upload(ctx context.Context, req *UploadRequest) (*UploadRespons
 		return nil, fmt.Errorf("upload error %d: %s", resp.StatusCode, string(body))
 	}
 
-	var uploadResp UploadResponse
+	var uploadResp Response
 	if err := json.Unmarshal(body, &uploadResp); err != nil {
 		return nil, fmt.Errorf("parse response: %w", err)
 	}

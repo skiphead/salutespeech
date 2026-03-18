@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/skiphead/salutespeech/synthesis/async"
 	"github.com/skiphead/salutespeech/types"
 )
 
@@ -117,6 +118,28 @@ func DetectAudioContentTypeFromReader(r io.Reader) (types.ContentType, error) {
 	}
 
 	return "", fmt.Errorf("unsupported audio format: no matching signature")
+}
+
+// ContentTypeToEncoding converts a types.ContentType to the corresponding async.Encoding.
+// Returns an error if the content type has no direct encoding equivalent.
+//
+// Supported mappings:
+//   - ContentAudioPCM16k16bit -> EncodingPCM16
+//   - ContentAudioOGGOpus -> EncodingOpus
+//   - ContentAudioMPEG, ContentAudioFLAC -> error (no direct equivalent)
+func ContentTypeToEncoding(ct types.ContentType) (async.Encoding, error) {
+	switch ct {
+	case types.ContentAudioPCM16k16bit:
+		return async.EncodingPCM16, nil
+	case types.ContentAudioOGGOpus:
+		return async.EncodingOpus, nil
+	case types.ContentAudioMPEG:
+		return "", fmt.Errorf("no direct encoding equivalent for content type: %s (mp3 not supported in async.Encoding)", ct)
+	case types.ContentAudioFLAC:
+		return "", fmt.Errorf("no direct encoding equivalent for content type: %s (flac not supported in async.Encoding)", ct)
+	default:
+		return "", fmt.Errorf("unsupported content type: %s", ct)
+	}
 }
 
 // isValidMP3Frame validates MP3 frame header bytes according to the MPEG audio specification.
