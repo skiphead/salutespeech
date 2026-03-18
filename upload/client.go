@@ -15,7 +15,7 @@ import (
 	"github.com/skiphead/salutespeech/types"
 )
 
-type Upload interface {
+type Client interface {
 	Upload(ctx context.Context, req *Request) (*Response, error)
 	UploadFromFile(ctx context.Context, path string, ct types.ContentType) (*Response, error)
 }
@@ -29,7 +29,7 @@ type uploadClient struct {
 }
 
 // NewClient creates new upload client
-func NewClient(tokenMgr *client.TokenManager, cfg Config) (Upload, error) {
+func NewClient(tokenMgr *client.TokenManager, cfg Config) (Client, error) {
 	if tokenMgr == nil {
 		return nil, types.ErrTokenManagerRequired
 	}
@@ -91,7 +91,7 @@ func (c *uploadClient) UploadFromFile(ctx context.Context, path string, ct types
 	})
 }
 
-// Upload uploads file data
+// Client uploads file data
 func (c *uploadClient) Upload(ctx context.Context, req *Request) (*Response, error) {
 	if req == nil || len(req.Data) == 0 {
 		return nil, types.ErrEmptyFileData

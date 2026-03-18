@@ -54,7 +54,7 @@ func main() {
 		log.Fatal(detectErr)
 	}
 
-	// Upload audio file to SaluteSpeech storage
+	// Client audio file to SaluteSpeech storage
 	// The detected content type ensures proper format specification
 	uploadResp, err := uploadClient.UploadFromFile(context.Background(), pathAudioFile,
 		audioType)

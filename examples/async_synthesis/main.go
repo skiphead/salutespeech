@@ -37,7 +37,7 @@ func main() {
 	// The token manager handles token caching, refresh, and provides valid tokens for API requests
 	tokenMgr := client.NewTokenManager(oauthClient, client.TokenManagerConfig{})
 
-	// Upload text file to SaluteSpeech storage
+	// Client text file to SaluteSpeech storage
 	// For async synthesis, text must be uploaded as a file before processing
 	uploadClient, err := upload.NewClient(tokenMgr, upload.Config{})
 	if err != nil {
@@ -65,7 +65,7 @@ func main() {
 		}
 	}(textFile) // Clean up temporary file
 
-	// Upload text file to the API
+	// Client text file to the API
 	// Returns a file ID that will be used in the synthesis request
 	uploadResp, err := uploadClient.UploadFromFile(context.Background(), textFile,
 		types.ContentTextPlain) // Content type for plain text
