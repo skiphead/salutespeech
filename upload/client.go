@@ -11,7 +11,7 @@ import (
 	"os"
 
 	"github.com/google/uuid"
-	"github.com/skiphead/salutespeech/pkg/client"
+	"github.com/skiphead/oauth"
 	"github.com/skiphead/salutespeech/types"
 )
 
