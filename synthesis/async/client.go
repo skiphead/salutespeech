@@ -14,7 +14,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/skiphead/oauth"
+	"github.com/skiphead/oauth/client"
 	"github.com/skiphead/salutespeech/types"
 )
 

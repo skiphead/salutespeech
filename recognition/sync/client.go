@@ -16,19 +16,34 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/skiphead/oauth"
+	"github.com/skiphead/oauth/client"
 	"github.com/skiphead/salutespeech/types"
 )
+
+// HTTPDoer defines the interface for making HTTP requests
+// Allows for easier testing by mocking HTTP client
+type HTTPDoer interface {
+	Do(req *http.Request) (*http.Response, error)
+}
+
+// Recognizer defines the public interface for synchronous speech recognition
+type Recognizer interface {
+	Recognize(ctx context.Context, req *Request) (*Response, error)
+	RecognizeFromFile(ctx context.Context, filePath string, contentType types.ContentType, opts Options) (*Response, error)
+}
 
 // Client handles synchronous speech recognition operations.
 // It manages HTTP communication, authentication, and request validation
 // for real-time audio transcription through the SaluteSpeech API.
 type Client struct {
-	httpClient *http.Client
+	httpClient HTTPDoer
 	baseURL    string
 	tokenMgr   *client.TokenManager
 	logger     types.Logger
 }
+
+// Ensure Client implements Recognizer
+var _ Recognizer = (*Client)(nil)
 
 // Config represents the configuration options for creating a new sync recognition client.
 // It allows customization of the API endpoint, timeout behavior, TLS settings, and logging.
@@ -37,6 +52,7 @@ type Config struct {
 	Timeout       time.Duration // Request timeout (defaults to 2x DefaultAPITimeout)
 	AllowInsecure bool          // When true, disables TLS certificate verification
 	Logger        types.Logger  // Logger instance for client operations
+	HTTPClient    HTTPDoer      // Optional custom HTTP client (for testing)
 }
 
 // NewClient creates a new synchronous speech recognition client with the provided configuration.
@@ -64,17 +80,22 @@ func NewClient(tokenMgr *client.TokenManager, cfg Config) (*Client, error) {
 		timeout = types.DefaultAPITimeout * 2 // sync recognition may take longer
 	}
 
-	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: cfg.AllowInsecure},
-	}
+	var httpClient HTTPDoer
+	if cfg.HTTPClient != nil {
+		httpClient = cfg.HTTPClient
+	} else {
+		transport := &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: cfg.AllowInsecure},
+		}
 
-	if cfg.AllowInsecure {
-		logger.Warn("sync recognition client: TLS verification disabled")
-	}
+		if cfg.AllowInsecure {
+			logger.Warn("sync recognition client: TLS verification disabled")
+		}
 
-	httpClient := &http.Client{
-		Transport: transport,
-		Timeout:   timeout,
+		httpClient = &http.Client{
+			Transport: transport,
+			Timeout:   timeout,
+		}
 	}
 
 	return &Client{
@@ -92,7 +113,7 @@ func NewClient(tokenMgr *client.TokenManager, cfg Config) (*Client, error) {
 // Returns the recognition response containing transcribed text and metadata,
 // or an error if the request fails or validation checks are not met.
 func (c *Client) Recognize(ctx context.Context, req *Request) (*Response, error) {
-	if err := c.validateRequest(req); err != nil {
+	if err := c.applyDefaultsAndValidate(req); err != nil {
 		return nil, fmt.Errorf("invalid request: %w", err)
 	}
 
@@ -141,18 +162,13 @@ func (c *Client) Recognize(ctx context.Context, req *Request) (*Response, error)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			return
-		}
-	}(resp.Body)
+	defer c.safeClose(resp.Body)
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
 	}
-	fmt.Println(string(body))
+
 	switch resp.StatusCode {
 	case http.StatusOK:
 		var syncResp Response
@@ -212,11 +228,11 @@ func (c *Client) RecognizeFromFile(ctx context.Context, filePath string, content
 	return c.Recognize(ctx, req)
 }
 
-// validateRequest performs comprehensive validation of the recognition request.
+// applyDefaultsAndValidate performs validation and applies default values
 // It checks for nil request, non-empty audio data, file size limits,
 // valid content type, supported language, and valid sample rate.
 // Default values are applied for missing optional parameters.
-func (c *Client) validateRequest(req *Request) error {
+func (c *Client) applyDefaultsAndValidate(req *Request) error {
 	if req == nil {
 		return types.ErrRequestNil
 	}
@@ -238,6 +254,9 @@ func (c *Client) validateRequest(req *Request) error {
 	default:
 		return fmt.Errorf("unsupported language: %s", req.Language)
 	}
+	if req.SampleRate == 0 {
+		req.SampleRate = 16000 // default sample rate
+	}
 	if req.SampleRate < types.MinSampleRate || req.SampleRate > types.MaxSampleRate {
 		return fmt.Errorf("sample_rate out of range: %d (min %d, max %d)",
 			req.SampleRate, types.MinSampleRate, types.MaxSampleRate)
@@ -246,4 +265,11 @@ func (c *Client) validateRequest(req *Request) error {
 		req.ChannelsCount = 1
 	}
 	return nil
+}
+
+// safeClose safely closes an io.Closer and logs any errors
+func (c *Client) safeClose(closer io.Closer) {
+	if err := closer.Close(); err != nil {
+		c.logger.Warn("failed to close response body", "error", err)
+	}
 }
