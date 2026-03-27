@@ -29,6 +29,16 @@ const (
 	ModelGeneral Model = "general"
 )
 
+// IsValid checks if the model is supported.
+func (m Model) IsValid() bool {
+	switch m {
+	case ModelCallcenter, ModelMedia, ModelIVR, ModelGeneral:
+		return true
+	default:
+		return false
+	}
+}
+
 // Language represents the language of the audio being recognized.
 // Each language code follows the ISO 639-1 language code with ISO 3166-1 alpha-2 country code.
 type Language string
@@ -49,6 +59,16 @@ const (
 	// LangUzUZ represents Uzbek language (Uzbekistan)
 	LangUzUZ Language = "uz-UZ"
 )
+
+// IsValid checks if the language is supported.
+func (l Language) IsValid() bool {
+	switch l {
+	case LangRuRU, LangEnUS, LangKkKZ, LangKyKG, LangUzUZ:
+		return true
+	default:
+		return false
+	}
+}
 
 // EmotionScores represents detailed emotion analysis scores.
 // This structure provides separate scores for different emotion classification

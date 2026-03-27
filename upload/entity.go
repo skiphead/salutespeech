@@ -1,5 +1,6 @@
 package upload
 
+/*
 import (
 	"time"
 
@@ -28,3 +29,5 @@ type Config struct {
 	Timeout       time.Duration
 	Logger        types.Logger
 }
+
+*/

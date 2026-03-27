@@ -20,13 +20,24 @@ import (
 	"github.com/skiphead/salutespeech/types"
 )
 
-// HTTPDoer defines the interface for making HTTP requests
-// Allows for easier testing by mocking HTTP client
+const (
+	// DefaultSampleRate is the default sample rate for audio recognition
+	DefaultSampleRate = 16000
+
+	// DefaultChannelsCount is the default number of audio channels
+	DefaultChannelsCount = 1
+
+	// DefaultTimeoutMultiplier is the multiplier for sync recognition timeout
+	DefaultTimeoutMultiplier = 2
+)
+
+// HTTPDoer defines the interface for making HTTP requests.
+// Allows for easier testing by mocking HTTP client.
 type HTTPDoer interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-// Recognizer defines the public interface for synchronous speech recognition
+// Recognizer defines the public interface for synchronous speech recognition.
 type Recognizer interface {
 	Recognize(ctx context.Context, req *Request) (*Response, error)
 	RecognizeFromFile(ctx context.Context, filePath string, contentType types.ContentType, opts Options) (*Response, error)
@@ -55,14 +66,33 @@ type Config struct {
 	HTTPClient    HTTPDoer      // Optional custom HTTP client (for testing)
 }
 
+// Validate checks if the configuration is valid.
+func (c Config) Validate() error {
+	if c.BaseURL == "" {
+		// BaseURL can be empty, will use default
+		return nil
+	}
+
+	// Validate URL format
+	if _, err := url.Parse(c.BaseURL); err != nil {
+		return fmt.Errorf("invalid base URL: %w", err)
+	}
+
+	return nil
+}
+
 // NewClient creates a new synchronous speech recognition client with the provided configuration.
 // It initializes the HTTP client, validates the token manager, and sets up default values
 // for any missing configuration parameters.
 //
 // Returns an error if token manager is nil or if configuration validation fails.
-func NewClient(tokenMgr *client.TokenManager, cfg Config) (*Client, error) {
+func NewClient(tokenMgr *client.TokenManager, cfg Config) (Recognizer, error) {
 	if tokenMgr == nil {
 		return nil, types.ErrTokenManagerRequired
+	}
+
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
 	logger := cfg.Logger
@@ -77,7 +107,7 @@ func NewClient(tokenMgr *client.TokenManager, cfg Config) (*Client, error) {
 
 	timeout := cfg.Timeout
 	if timeout == 0 {
-		timeout = types.DefaultAPITimeout * 2 // sync recognition may take longer
+		timeout = types.DefaultAPITimeout * DefaultTimeoutMultiplier // sync recognition may take longer
 	}
 
 	var httpClient HTTPDoer
@@ -106,6 +136,37 @@ func NewClient(tokenMgr *client.TokenManager, cfg Config) (*Client, error) {
 	}, nil
 }
 
+// buildURL constructs the request URL with query parameters.
+func (c *Client) buildURL(req *Request) (string, error) {
+	u, err := url.Parse(c.baseURL)
+	if err != nil {
+		return "", fmt.Errorf("parse base URL: %w", err)
+	}
+
+	q := u.Query()
+
+	if req.Language != "" {
+		q.Set("language", string(req.Language))
+	}
+
+	q.Set("enable_profanity_filter", fmt.Sprintf("%t", req.EnableProfanityFilter))
+
+	if req.Model != "" {
+		q.Set("model", string(req.Model))
+	}
+
+	if req.SampleRate > 0 {
+		q.Set("sample_rate", fmt.Sprintf("%d", req.SampleRate))
+	}
+
+	if req.ChannelsCount > 0 {
+		q.Set("channels_count", fmt.Sprintf("%d", req.ChannelsCount))
+	}
+
+	u.RawQuery = q.Encode()
+	return u.String(), nil
+}
+
 // Recognize performs synchronous speech recognition on the provided audio data.
 // It handles authentication, request construction, and response parsing.
 // The context can be used for cancellation and timeout control.
@@ -122,28 +183,12 @@ func (c *Client) Recognize(ctx context.Context, req *Request) (*Response, error)
 		return nil, fmt.Errorf("get auth token: %w", err)
 	}
 
-	u, err := url.Parse(c.baseURL)
+	buildURL, err := c.buildURL(req)
 	if err != nil {
-		return nil, fmt.Errorf("invalid URL: %w", err)
+		return nil, fmt.Errorf("build URL: %w", err)
 	}
 
-	q := u.Query()
-	if req.Language != "" {
-		q.Set("language", string(req.Language))
-	}
-	q.Set("enable_profanity_filter", fmt.Sprintf("%t", req.EnableProfanityFilter))
-	if req.Model != "" {
-		q.Set("model", string(req.Model))
-	}
-	if req.SampleRate > 0 {
-		q.Set("sample_rate", fmt.Sprintf("%d", req.SampleRate))
-	}
-	if req.ChannelsCount > 0 {
-		q.Set("channels_count", fmt.Sprintf("%d", req.ChannelsCount))
-	}
-	u.RawQuery = q.Encode()
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), bytes.NewReader(req.Data))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, buildURL, bytes.NewReader(req.Data))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -169,29 +214,41 @@ func (c *Client) Recognize(ctx context.Context, req *Request) (*Response, error)
 		return nil, fmt.Errorf("read response: %w", err)
 	}
 
-	switch resp.StatusCode {
+	return c.handleResponse(resp.StatusCode, body)
+}
+
+// handleResponse processes the HTTP response and returns appropriate result or error.
+func (c *Client) handleResponse(statusCode int, body []byte) (*Response, error) {
+	switch statusCode {
 	case http.StatusOK:
 		var syncResp Response
 		if err := json.Unmarshal(body, &syncResp); err != nil {
 			return nil, fmt.Errorf("parse response: %w", err)
 		}
+		syncResp.Status = statusCode
 		return &syncResp, nil
 
 	case http.StatusBadRequest:
 		return nil, fmt.Errorf("%w: %s", types.ErrBadRequest, string(body))
+
 	case http.StatusUnauthorized:
-		_ = c.tokenMgr.ForceRefresh(ctx)
+		// Token expired or invalid - caller should refresh
 		return nil, fmt.Errorf("%w: %s", types.ErrUnauthorized, string(body))
+
 	case http.StatusNotFound:
 		return nil, fmt.Errorf("model not found (404): %s", string(body))
+
 	case http.StatusRequestEntityTooLarge:
-		return nil, fmt.Errorf("file too large (413): max 2MB. Response: %s", string(body))
+		return nil, fmt.Errorf("file too large (413): max %d bytes. Response: %s", types.MaxSyncFileSize, string(body))
+
 	case http.StatusTooManyRequests:
 		return nil, fmt.Errorf("%w: %s", types.ErrTooManyRequests, string(body))
+
 	case http.StatusInternalServerError:
 		return nil, fmt.Errorf("%w: %s", types.ErrServerError, string(body))
+
 	default:
-		return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("unexpected status %d: %s", statusCode, string(body))
 	}
 }
 
@@ -202,14 +259,26 @@ func (c *Client) Recognize(ctx context.Context, req *Request) (*Response, error)
 // Returns the recognition response or an error if file reading fails,
 // validation checks fail, or the recognition request fails.
 func (c *Client) RecognizeFromFile(ctx context.Context, filePath string, contentType types.ContentType, opts Options) (*Response, error) {
+	if filePath == "" {
+		return nil, fmt.Errorf("file path cannot be empty")
+	}
+
+	// Get file info for size validation
+	fileInfo, err := os.Stat(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("stat file: %w", err)
+	}
+
+	// Check file size before reading to avoid memory issues
+	if fileInfo.Size() > int64(types.MaxSyncFileSize) {
+		return nil, fmt.Errorf("file too large: %d bytes (max %d)", fileInfo.Size(), types.MaxSyncFileSize)
+	}
+
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("read file: %w", err)
 	}
 
-	if len(data) > types.MaxSyncFileSize {
-		return nil, fmt.Errorf("file too large: %d bytes (max %d)", len(data), types.MaxSyncFileSize)
-	}
 	if len(data) < types.MinFileSize {
 		return nil, fmt.Errorf("%w: %d bytes (min %d)", types.ErrFileTooSmall, len(data), types.MinFileSize)
 	}
@@ -228,7 +297,7 @@ func (c *Client) RecognizeFromFile(ctx context.Context, filePath string, content
 	return c.Recognize(ctx, req)
 }
 
-// applyDefaultsAndValidate performs validation and applies default values
+// applyDefaultsAndValidate performs validation and applies default values.
 // It checks for nil request, non-empty audio data, file size limits,
 // valid content type, supported language, and valid sample rate.
 // Default values are applied for missing optional parameters.
@@ -236,38 +305,54 @@ func (c *Client) applyDefaultsAndValidate(req *Request) error {
 	if req == nil {
 		return types.ErrRequestNil
 	}
+
 	if len(req.Data) == 0 {
 		return types.ErrEmptyFileData
 	}
+
 	if len(req.Data) > types.MaxSyncFileSize {
 		return fmt.Errorf("audio too large: %d bytes (max %d)", len(req.Data), types.MaxSyncFileSize)
 	}
+
 	if !req.ContentType.IsValid() {
 		return fmt.Errorf("%w: %s", types.ErrInvalidContentType, req.ContentType)
 	}
+
+	// Apply and validate language
 	if req.Language == "" {
 		req.Language = LangRuRU
 	}
-	switch req.Language {
-	case LangRuRU, LangEnUS, LangKkKZ, LangKyKG, LangUzUZ:
-		// valid
-	default:
+	if !req.Language.IsValid() {
 		return fmt.Errorf("unsupported language: %s", req.Language)
 	}
+
+	// Apply and validate sample rate
 	if req.SampleRate == 0 {
-		req.SampleRate = 16000 // default sample rate
+		req.SampleRate = DefaultSampleRate
 	}
 	if req.SampleRate < types.MinSampleRate || req.SampleRate > types.MaxSampleRate {
 		return fmt.Errorf("sample_rate out of range: %d (min %d, max %d)",
 			req.SampleRate, types.MinSampleRate, types.MaxSampleRate)
 	}
-	if req.ChannelsCount < types.MinChannelsCount || req.ChannelsCount > types.MaxChannelsCount {
-		req.ChannelsCount = 1
+
+	// Apply and validate channels count
+	if req.ChannelsCount == 0 {
+		req.ChannelsCount = DefaultChannelsCount
 	}
+	if req.ChannelsCount < types.MinChannelsCount || req.ChannelsCount > types.MaxChannelsCount {
+		return fmt.Errorf("channels_count out of range: %d (min %d, max %d)",
+			req.ChannelsCount, types.MinChannelsCount, types.MaxChannelsCount)
+	}
+
+	// Validate model if provided
+	if req.Model != "" && !req.Model.IsValid() {
+		return fmt.Errorf("unsupported model: %s", req.Model)
+	}
+
 	return nil
 }
 
-// safeClose safely closes an io.Closer and logs any errors
+// safeClose safely closes an io.Closer and logs any errors.
 func (c *Client) safeClose(closer io.Closer) {
 	if err := closer.Close(); err != nil {
 		c.logger.Warn("failed to close response body", "error", err)

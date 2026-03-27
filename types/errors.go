@@ -19,6 +19,7 @@ var (
 	ErrRequestFileIDRequired = errors.New("request_file_id is required")
 	ErrOptionsRequired       = errors.New("options is required")
 	ErrEmptyText             = errors.New("text is empty")
+	ErrFileTooLarge          = errors.New("file too large")
 
 	// API errors
 	ErrUnauthorized    = errors.New("unauthorized")

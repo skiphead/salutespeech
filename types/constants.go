@@ -25,6 +25,7 @@ const (
 	MaxChannelsCount   = 2
 	MinChannelsCount   = 1
 	MaxHypothesesCount = 5
+	MaxUploadFileSize  = 20 * 1024 * 1024 // 20 MB
 )
 
 // Timeouts

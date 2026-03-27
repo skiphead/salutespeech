@@ -18,24 +18,38 @@ import (
 	"github.com/skiphead/salutespeech/types"
 )
 
-type Client interface {
+// HTTPDoer defines the interface for making HTTP requests.
+// This allows for easier testing by mocking HTTP clients.
+type HTTPDoer interface {
+	Do(req *http.Request) (*http.Response, error)
+}
+
+// Synthesizer is the public interface for async speech synthesis operations.
+type Synthesizer interface {
 	CreateTask(ctx context.Context, req *Request) (*Response, error)
 	GetTaskStatus(ctx context.Context, taskID string) (*Response, error)
 	DownloadResult(ctx context.Context, responseFileID string) ([]byte, error)
 	WaitForTask(ctx context.Context, taskID string, pollInterval, timeout time.Duration, downloadAudio bool) (*TaskResult, error)
 }
 
-// asyncClient handles asynchronous speech synthesis operations.
+// Client handles asynchronous speech synthesis operations.
 // It manages task creation, status polling, and audio file retrieval
 // for long-running text-to-speech conversion jobs through the SaluteSpeech API.
-type asyncClient struct {
-	httpClient    *http.Client
+type Client struct {
+	httpClient    HTTPDoer
 	synthesizeURL string // URL for creating synthesis tasks
 	taskURL       string // URL for checking task status
 	downloadURL   string // URL for downloading synthesized audio
 	tokenMgr      *client.TokenManager
 	logger        types.Logger
 }
+
+// Ensure Client implements Synthesizer interface
+var _ Synthesizer = (*Client)(nil)
+
+const (
+	maxAudioSize = 100 * 1024 * 1024 // 100 MB limit for audio downloads
+)
 
 // Config represents the configuration options for creating a new async synthesis client.
 // It allows customization of API endpoints, timeout behavior, TLS settings, and logging.
@@ -48,14 +62,26 @@ type Config struct {
 	Logger        types.Logger  // Logger instance for client operations
 }
 
+// Validate checks if the configuration is valid.
+func (c Config) Validate() error {
+	if c.BaseURL == "" && c.TaskURL == "" && c.DownloadURL == "" {
+		return fmt.Errorf("at least one URL must be specified")
+	}
+	return nil
+}
+
 // NewClient creates a new asynchronous speech synthesis client with the provided configuration.
 // It initializes the HTTP client, validates the token manager, and sets up default values
 // for any missing configuration parameters.
 //
 // Returns an error if token manager is nil or if configuration validation fails.
-func NewClient(tokenMgr *client.TokenManager, cfg Config) (Client, error) {
+func NewClient(tokenMgr *client.TokenManager, cfg Config) (Synthesizer, error) {
 	if tokenMgr == nil {
 		return nil, types.ErrTokenManagerRequired
+	}
+
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
 	logger := cfg.Logger
@@ -95,7 +121,7 @@ func NewClient(tokenMgr *client.TokenManager, cfg Config) (Client, error) {
 		Timeout:   timeout,
 	}
 
-	return &asyncClient{
+	return &Client{
 		httpClient:    httpClient,
 		synthesizeURL: synURL,
 		taskURL:       taskURL,
@@ -105,15 +131,46 @@ func NewClient(tokenMgr *client.TokenManager, cfg Config) (Client, error) {
 	}, nil
 }
 
+// safeClose safely closes an io.Closer and logs any error.
+func (c *Client) safeClose(closer io.Closer) {
+	if err := closer.Close(); err != nil {
+		c.logger.Warn(fmt.Sprintf("failed to close: %v", err))
+	}
+}
+
+// buildURL constructs a URL with query parameters.
+func (c *Client) buildURL(base string, params map[string]string) (string, error) {
+	u, err := url.Parse(base)
+	if err != nil {
+		return "", fmt.Errorf("parse URL %s: %w", base, err)
+	}
+
+	q := u.Query()
+	for key, value := range params {
+		q.Set(key, value)
+	}
+	u.RawQuery = q.Encode()
+	return u.String(), nil
+}
+
 // CreateTask creates an asynchronous speech synthesis task.
 // It submits a text-to-speech request with the specified parameters including
 // voice, audio encoding, and text content via the request file ID.
 //
 // Returns a task response containing the task ID for subsequent status checking
 // and result retrieval, or an error if validation or API request fails.
-func (c *asyncClient) CreateTask(ctx context.Context, req *Request) (*Response, error) {
-	if req == nil || req.RequestFileID == "" || req.AudioEncoding == "" || req.Voice == "" {
-		return nil, fmt.Errorf("invalid synthesis request")
+func (c *Client) CreateTask(ctx context.Context, req *Request) (*Response, error) {
+	if req == nil {
+		return nil, fmt.Errorf("request cannot be nil")
+	}
+	if req.RequestFileID == "" {
+		return nil, fmt.Errorf("request_file_id is required")
+	}
+	if req.AudioEncoding == "" {
+		return nil, fmt.Errorf("audio_encoding is required")
+	}
+	if req.Voice == "" {
+		return nil, fmt.Errorf("voice is required")
 	}
 
 	authHeader, err := c.tokenMgr.GetTokenWithHeader(ctx)
@@ -139,12 +196,7 @@ func (c *asyncClient) CreateTask(ctx context.Context, req *Request) (*Response, 
 	if err != nil {
 		return nil, fmt.Errorf("request: %w", err)
 	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			c.logger.Warn("failed to close response body")
-		}
-	}(resp.Body)
+	defer c.safeClose(resp.Body)
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -168,18 +220,22 @@ func (c *asyncClient) CreateTask(ctx context.Context, req *Request) (*Response, 
 // GetTaskStatus retrieves the current status of an asynchronous synthesis task.
 // It returns a task status response containing information about the task's progress,
 // including whether it's pending, processing, completed, or failed.
-func (c *asyncClient) GetTaskStatus(ctx context.Context, taskID string) (*Response, error) {
+func (c *Client) GetTaskStatus(ctx context.Context, taskID string) (*Response, error) {
+	if taskID == "" {
+		return nil, types.ErrEmptyTaskID
+	}
+
+	buildURL, err := c.buildURL(c.taskURL, map[string]string{"id": taskID})
+	if err != nil {
+		return nil, fmt.Errorf("build URL: %w", err)
+	}
+
 	authHeader, err := c.tokenMgr.GetTokenWithHeader(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get token: %w", err)
 	}
 
-	u, _ := url.Parse(c.taskURL)
-	q := u.Query()
-	q.Set("id", taskID)
-	u.RawQuery = q.Encode()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, buildURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -190,12 +246,7 @@ func (c *asyncClient) GetTaskStatus(ctx context.Context, taskID string) (*Respon
 	if err != nil {
 		return nil, fmt.Errorf("request: %w", err)
 	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			c.logger.Warn("close response body")
-		}
-	}(resp.Body)
+	defer c.safeClose(resp.Body)
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -216,18 +267,22 @@ func (c *asyncClient) GetTaskStatus(ctx context.Context, taskID string) (*Respon
 // DownloadResult downloads the synthesized audio for a completed task.
 // It retrieves the audio file using the response file ID provided in the task status.
 // Returns the audio data as a byte slice or an error if download fails.
-func (c *asyncClient) DownloadResult(ctx context.Context, responseFileID string) ([]byte, error) {
+func (c *Client) DownloadResult(ctx context.Context, responseFileID string) ([]byte, error) {
+	if responseFileID == "" {
+		return nil, fmt.Errorf("response file ID cannot be empty")
+	}
+
+	buildURL, err := c.buildURL(c.downloadURL, map[string]string{"response_file_id": responseFileID})
+	if err != nil {
+		return nil, fmt.Errorf("build URL: %w", err)
+	}
+
 	authHeader, err := c.tokenMgr.GetTokenWithHeader(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get token: %w", err)
 	}
 
-	u, _ := url.Parse(c.downloadURL)
-	q := u.Query()
-	q.Set("response_file_id", responseFileID)
-	u.RawQuery = q.Encode()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, buildURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -238,22 +293,45 @@ func (c *asyncClient) DownloadResult(ctx context.Context, responseFileID string)
 	if err != nil {
 		return nil, fmt.Errorf("download request: %w", err)
 	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			return
-		}
-	}(resp.Body)
+	defer c.safeClose(resp.Body)
 
-	body, err := io.ReadAll(resp.Body)
+	// Limit response size to prevent memory exhaustion
+	limitedReader := io.LimitReader(resp.Body, maxAudioSize+1)
+	body, err := io.ReadAll(limitedReader)
 	if err != nil {
 		return nil, fmt.Errorf("read audio: %w", err)
+	}
+
+	// Check if file exceeded the limit
+	if int64(len(body)) > maxAudioSize {
+		return nil, fmt.Errorf("audio file exceeds maximum size of %d bytes", maxAudioSize)
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("download error %d: %s", resp.StatusCode, string(body))
 	}
 	return body, nil
+}
+
+// handleCompletedTask processes a completed task, optionally downloading audio.
+func (c *Client) handleCompletedTask(ctx context.Context, taskID string, status *Response, downloadAudio bool) (*TaskResult, error) {
+	result := &TaskResult{
+		ID:             taskID,
+		Status:         types.StatusDONE,
+		ResponseFileID: status.Result.ResponseFileID,
+	}
+
+	if !downloadAudio {
+		return result, nil
+	}
+
+	audio, err := c.DownloadResult(ctx, status.Result.ResponseFileID)
+	if err != nil {
+		return result, fmt.Errorf("download audio: %w", err)
+	}
+
+	result.AudioData = audio
+	return result, nil
 }
 
 // WaitForTask polls the task status until completion, error, or timeout.
@@ -270,7 +348,11 @@ func (c *asyncClient) DownloadResult(ctx context.Context, responseFileID string)
 //
 // Returns a TaskResult containing task metadata and optionally the audio data,
 // or an error if the task fails or timeout occurs.
-func (c *asyncClient) WaitForTask(ctx context.Context, taskID string, pollInterval, timeout time.Duration, downloadAudio bool) (*TaskResult, error) {
+func (c *Client) WaitForTask(ctx context.Context, taskID string, pollInterval, timeout time.Duration, downloadAudio bool) (*TaskResult, error) {
+	if taskID == "" {
+		return nil, types.ErrEmptyTaskID
+	}
+
 	if pollInterval == 0 {
 		pollInterval = types.DefaultPollInterval
 	}
@@ -281,13 +363,29 @@ func (c *asyncClient) WaitForTask(ctx context.Context, taskID string, pollInterv
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	// Initial check before entering ticker loop
+	initialStatus, err := c.GetTaskStatus(ctxWithTimeout, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("initial status check: %w", err)
+	}
+
+	// Check if task is already completed
+	switch initialStatus.Result.Status {
+	case types.StatusDONE:
+		return c.handleCompletedTask(ctxWithTimeout, taskID, initialStatus, downloadAudio)
+	case types.StatusERROR:
+		return nil, fmt.Errorf("task already failed: status=%s", initialStatus.Result.Status)
+	case types.StatusCANCELED:
+		return nil, fmt.Errorf("task already canceled")
+	}
+
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctxWithTimeout.Done():
-			return nil, fmt.Errorf("timeout waiting for task %s", taskID)
+			return nil, fmt.Errorf("timeout waiting for task %s: %w", taskID, ctxWithTimeout.Err())
 		case <-ticker.C:
 			status, err := c.GetTaskStatus(ctxWithTimeout, taskID)
 			if err != nil {
@@ -296,28 +394,13 @@ func (c *asyncClient) WaitForTask(ctx context.Context, taskID string, pollInterv
 
 			switch status.Result.Status {
 			case types.StatusDONE:
-				result := &TaskResult{
-					ID:             taskID,
-					Status:         types.StatusDONE,
-					ResponseFileID: status.Result.ID,
-				}
-				if !downloadAudio {
-					return result, nil
-				}
-
-				audio, err := c.DownloadResult(ctxWithTimeout, status.Result.ResponseFileId)
-				if err != nil {
-					return result, fmt.Errorf("download audio: %w", err)
-				}
-
-				result.AudioData = audio
-				return result, nil
-
+				return c.handleCompletedTask(ctxWithTimeout, taskID, status, downloadAudio)
 			case types.StatusERROR:
-				return nil, fmt.Errorf("task failed: response %s", status.Result.Status)
+				return nil, fmt.Errorf("task failed: status=%s", status.Result.Status)
 			case types.StatusCANCELED:
 				return nil, fmt.Errorf("task canceled")
 			}
+			// Continue polling for other statuses (NEW, PROCESSING)
 		}
 	}
 }

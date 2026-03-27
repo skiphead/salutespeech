@@ -34,6 +34,16 @@ const (
 	FormatG729 Format = "g729"
 )
 
+// IsValid checks if the format is supported.
+func (f Format) IsValid() bool {
+	switch f {
+	case FormatWAV16, FormatPCM16, FormatOpus, FormatALaw, FormatG729:
+		return true
+	default:
+		return false
+	}
+}
+
 // ContentType represents the type of input text content for synthesis.
 // Determines how the input text should be interpreted by the synthesis engine.
 type ContentType string
@@ -47,6 +57,16 @@ const (
 	// Allows fine-grained control over pronunciation, pitch, rate, and other speech attributes.
 	ContentTypeSSML ContentType = "application/ssml"
 )
+
+// IsValid checks if the content type is supported.
+func (ct ContentType) IsValid() bool {
+	switch ct {
+	case ContentTypeText, ContentTypeSSML:
+		return true
+	default:
+		return false
+	}
+}
 
 // Request represents a synchronous speech synthesis request.
 // It contains all parameters needed to convert text to speech.

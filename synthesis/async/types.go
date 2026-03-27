@@ -41,7 +41,7 @@ type Request struct {
 	// The file must be uploaded to SaluteSpeech storage before creating the task.
 	RequestFileID string `json:"request_file_id"`
 
-	// AudioEncoding specifies the desired output audio format (e.g., "Opus").
+	// AudioEncoding specifies the desired output audio format (e.g., "opus").
 	AudioEncoding Encoding `json:"audio_encoding"`
 
 	// Voice determines which voice model to use for synthesis.
@@ -63,8 +63,9 @@ type Result struct {
 
 	// Status indicates the current state of the task (NEW, PROCESSING, DONE, ERROR, CANCELED).
 	Status types.TaskStatus `json:"status"`
-	// ResponseFileId object id
-	ResponseFileId string `json:"response_file_id"`
+
+	// ResponseFileID is the ID of the generated audio file (available when status is DONE).
+	ResponseFileID string `json:"response_file_id"`
 }
 
 // Response represents the API response for a synthesis task creation request.

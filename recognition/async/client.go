@@ -186,9 +186,9 @@ func (c *Client) CreateTask(ctx context.Context, req *Request) (*Response, error
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	url := c.buildURL("speech:async_recognize", nil)
+	buildURL := c.buildURL("speech:async_recognize", nil)
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, buildURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -254,9 +254,9 @@ func (c *Client) GetTaskResult(ctx context.Context, taskID string) (*TaskResult,
 		return nil, fmt.Errorf("get auth token: %w", err)
 	}
 
-	url := c.buildURL("task:get", map[string]string{"id": taskID})
+	buildURL := c.buildURL("task:get", map[string]string{"id": taskID})
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, buildURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -362,9 +362,9 @@ func (c *Client) DownloadTaskResultToFile(ctx context.Context, responseFileID, o
 	}
 
 	// Construct proper URL for result download
-	url := c.buildURL("data:download", map[string]string{"response_file_id": responseFileID})
+	buildURL := c.buildURL("data:download", map[string]string{"response_file_id": responseFileID})
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, buildURL, nil)
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
@@ -428,9 +428,9 @@ func (c *Client) DownloadTaskResult(ctx context.Context, responseFileID string) 
 	}
 
 	// Construct proper URL for result download
-	url := c.buildURL("data:download", map[string]string{"response_file_id": responseFileID})
+	buildURL := c.buildURL("data:download", map[string]string{"response_file_id": responseFileID})
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, buildURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
