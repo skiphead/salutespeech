@@ -327,7 +327,7 @@ func (c *Client) WaitForResult(ctx context.Context, taskID string, pollInterval,
 			return result, nil
 		case string(types.StatusERROR):
 			return nil, fmt.Errorf("task failed with status: %s", result.Result.Status)
-		case string(types.StatusNEW), string(types.StatusPROCESSING):
+		case string(types.StatusNEW), string(types.StatusPROCESSING), string(types.StatusRUNNING):
 			// Continue polling
 		default:
 			return nil, fmt.Errorf("unknown task status: %s", result.Result.Status)
