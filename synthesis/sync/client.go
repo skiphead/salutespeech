@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/skiphead/salutespeech/client"
+	"github.com/skiphead/oauth"
 	"github.com/skiphead/salutespeech/types"
 	"github.com/skiphead/salutespeech/utils"
 )

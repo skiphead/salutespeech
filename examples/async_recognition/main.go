@@ -10,7 +10,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/skiphead/salutespeech/client"
+	client2 "github.com/skiphead/salutespeech/pkg/client"
 	"github.com/skiphead/salutespeech/recognition/async"
 	"github.com/skiphead/salutespeech/types"
 	"github.com/skiphead/salutespeech/upload"
@@ -20,11 +20,11 @@ import (
 func main() {
 	// Generate Basic Authentication credentials from client ID and secret
 	// These credentials are used to obtain OAuth tokens from the SaluteSpeech API
-	authKey := client.GenerateBasicAuthKey("client_id", "client_secret")
+	authKey := client2.GenerateBasicAuthKey("client_id", "client_secret")
 
 	// Create OAuth client for token management
 	// The OAuth client handles the authentication flow and token retrieval
-	oauthClient, err := client.NewOAuthClient(client.Config{
+	oauthClient, err := client2.NewOAuthClient(client2.Config{
 		AuthKey: authKey,                     // Base64-encoded client credentials
 		Scope:   types.ScopeSaluteSpeechPers, // API access scope for speech recognition
 		Timeout: 30 * time.Second,            // HTTP client timeout
@@ -35,7 +35,7 @@ func main() {
 
 	// Create token manager for automatic token refresh
 	// The token manager handles token caching, refresh, and provides valid tokens for API requests
-	tokenMgr := client.NewTokenManager(oauthClient, client.TokenManagerConfig{})
+	tokenMgr := client2.NewTokenManager(oauthClient, client2.TokenManagerConfig{})
 
 	// Initialize upload client for file uploads
 	// Files must be uploaded to SaluteSpeech storage before async processing

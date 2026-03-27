@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/skiphead/salutespeech/client"
+	"github.com/skiphead/oauth"
 	"github.com/skiphead/salutespeech/types"
 )
 
