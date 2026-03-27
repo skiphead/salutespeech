@@ -161,7 +161,8 @@ type TaskResult struct {
 	} `json:"result"`
 }
 
-// Определяем структуры для сериализации
+// DownloadFileResponse represents the detailed recognition results from a completed task.
+// This structure is used when parsing the downloaded result file.
 type DownloadFileResponse struct {
 	Results             []DownloadFileResult `json:"results"`
 	Eou                 bool                 `json:"eou"`
@@ -176,6 +177,7 @@ type DownloadFileResponse struct {
 	PersonIdentity      PersonIdentity       `json:"person_identity"`
 }
 
+// DownloadFileResult represents a single recognition segment in the result file.
 type DownloadFileResult struct {
 	Text           string          `json:"text"`
 	NormalizedText string          `json:"normalized_text"`
@@ -184,72 +186,37 @@ type DownloadFileResult struct {
 	WordAlignments []WordAlignment `json:"word_alignments"`
 }
 
+// WordAlignment represents timing information for individual words.
 type WordAlignment struct {
 	Word  string `json:"word"`
 	Start string `json:"start"`
 	End   string `json:"end"`
 }
 
+// EmotionsResult contains emotion analysis results.
 type EmotionsResult struct {
 	Positive float64 `json:"positive"`
 	Neutral  float64 `json:"neutral"`
 	Negative float64 `json:"negative"`
 }
 
+// BackendInfo contains metadata about the recognition backend.
 type BackendInfo struct {
 	ModelName     string `json:"model_name"`
 	ModelVersion  string `json:"model_version"`
 	ServerVersion string `json:"server_version"`
 }
 
+// SpeakerInfo contains diarization results.
 type SpeakerInfo struct {
 	SpeakerID             int `json:"speaker_id"`
 	MainSpeakerConfidence int `json:"main_speaker_confidence"`
 }
 
+// PersonIdentity contains demographic analysis results.
 type PersonIdentity struct {
 	Age         string `json:"age"`
 	Gender      string `json:"gender"`
 	AgeScore    int    `json:"age_score"`
 	GenderScore int    `json:"gender_score"`
-}
-
-type T struct {
-	Results []struct {
-		Text           string `json:"text"`
-		NormalizedText string `json:"normalized_text"`
-		Start          string `json:"start"`
-		End            string `json:"end"`
-		WordAlignments []struct {
-			Word  string `json:"word"`
-			Start string `json:"start"`
-			End   string `json:"end"`
-		} `json:"word_alignments"`
-	} `json:"results"`
-	Eou            bool `json:"eou"`
-	EmotionsResult struct {
-		Positive float64 `json:"positive"`
-		Neutral  float64 `json:"neutral"`
-		Negative float64 `json:"negative"`
-	} `json:"emotions_result"`
-	ProcessedAudioStart string `json:"processed_audio_start"`
-	ProcessedAudioEnd   string `json:"processed_audio_end"`
-	BackendInfo         struct {
-		ModelName     string `json:"model_name"`
-		ModelVersion  string `json:"model_version"`
-		ServerVersion string `json:"server_version"`
-	} `json:"backend_info"`
-	Channel     int `json:"channel"`
-	SpeakerInfo struct {
-		SpeakerId             int `json:"speaker_id"`
-		MainSpeakerConfidence int `json:"main_speaker_confidence"`
-	} `json:"speaker_info"`
-	EouReason      string `json:"eou_reason"`
-	Insight        string `json:"insight"`
-	PersonIdentity struct {
-		Age         string `json:"age"`
-		Gender      string `json:"gender"`
-		AgeScore    int    `json:"age_score"`
-		GenderScore int    `json:"gender_score"`
-	} `json:"person_identity"`
 }
