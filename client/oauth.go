@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,7 +24,9 @@ type OAuthClient struct {
 	oauthURL   string
 	authHeader string
 	scope      types.Scope
-	logger     types.Logger
+	logger     *slog.Logger
+	closeCh    chan struct{}
+	closeOnce  sync.Once
 }
 
 // Config represents OAuth client configuration
@@ -32,19 +36,31 @@ type Config struct {
 	OAuthURL      string
 	Timeout       time.Duration
 	AllowInsecure bool
-	Logger        types.Logger
+	Logger        *slog.Logger
 }
 
 // NewOAuthClient creates new OAuth client
 func NewOAuthClient(cfg Config) (*OAuthClient, error) {
+	// Validate required fields
 	if cfg.AuthKey == "" {
-		return nil, types.ErrAuthKeyRequired
+		return nil, fmt.Errorf("%w: auth key is required", types.ErrAuthKeyRequired)
 	}
 	if cfg.Scope == "" {
-		return nil, types.ErrScopeRequired
+		return nil, fmt.Errorf("%w: scope is required", types.ErrScopeRequired)
 	}
 
-	oauthURL := sanitizeURL(cfg.OAuthURL)
+	// Unified logger handling: fallback to default if nil
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.Default()
+		logger.Warn("logger not provided, using slog.Default()")
+	}
+
+	oauthURL, err := sanitizeURL(cfg.OAuthURL)
+	if err != nil {
+		logger.Warn("invalid OAuth URL, using default", slog.String("error", err.Error()))
+		oauthURL = types.DefaultOAuthURL
+	}
 	if oauthURL == "" {
 		oauthURL = types.DefaultOAuthURL
 	}
@@ -54,20 +70,18 @@ func NewOAuthClient(cfg Config) (*OAuthClient, error) {
 		timeout = types.DefaultTimeout
 	}
 
-	logger := cfg.Logger
-	if logger == nil {
-		logger = types.NoopLogger{}
-	}
-
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: cfg.AllowInsecure},
 	}
 
 	if cfg.AllowInsecure {
-		logger.Warn("TLS verification disabled (AllowInsecure=true)")
+		logger.Warn("TLS verification disabled")
 	}
 
-	httpClient := &http.Client{Transport: transport, Timeout: timeout}
+	httpClient := &http.Client{
+		Transport: transport,
+		Timeout:   timeout,
+	}
 
 	authHeader := cfg.AuthKey
 	if !strings.HasPrefix(strings.ToLower(cfg.AuthKey), "basic ") {
@@ -80,11 +94,19 @@ func NewOAuthClient(cfg Config) (*OAuthClient, error) {
 		authHeader: authHeader,
 		scope:      cfg.Scope,
 		logger:     logger,
+		closeCh:    make(chan struct{}),
 	}, nil
 }
 
 // RequestToken requests new token from OAuth server
 func (c *OAuthClient) RequestToken(ctx context.Context) (*types.Token, error) {
+	// Check if client is closed
+	select {
+	case <-c.closeCh:
+		return nil, fmt.Errorf("oauth client is closed")
+	default:
+	}
+
 	rqUID := uuid.New().String()
 
 	form := url.Values{}
@@ -102,6 +124,11 @@ func (c *OAuthClient) RequestToken(ctx context.Context) (*types.Token, error) {
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		select {
+		case <-c.closeCh:
+			return nil, fmt.Errorf("oauth client closed during request")
+		default:
+		}
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
@@ -131,12 +158,54 @@ func (c *OAuthClient) RequestToken(ctx context.Context) (*types.Token, error) {
 	}, nil
 }
 
+// Close cleans up OAuth client resources
+func (c *OAuthClient) Close() error {
+	c.closeOnce.Do(func() {
+		close(c.closeCh)
+
+		// Close idle connections
+		if c.httpClient != nil && c.httpClient.Transport != nil {
+			if transport, ok := c.httpClient.Transport.(*http.Transport); ok {
+				transport.CloseIdleConnections()
+			}
+		}
+
+		c.logger.Debug("oauth client closed")
+	})
+	return nil // Always return nil as there's no error case
+}
+
 // GenerateBasicAuthKey generates Basic Auth key from client ID and secret
 func GenerateBasicAuthKey(clientID, clientSecret string) string {
 	cred := fmt.Sprintf("%s:%s", clientID, clientSecret)
 	return base64.StdEncoding.EncodeToString([]byte(cred))
 }
 
-func sanitizeURL(s string) string {
-	return strings.Join(strings.Fields(s), "")
+// sanitizeURL validates and sanitizes URL
+func sanitizeURL(rawURL string) (string, error) {
+	if rawURL == "" {
+		return "", nil
+	}
+
+	// Trim whitespace
+	rawURL = strings.TrimSpace(rawURL)
+
+	// Parse URL
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid URL format: %w", err)
+	}
+
+	// Validate scheme
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		return "", fmt.Errorf("unsupported scheme: %s (must be http or https)", parsedURL.Scheme)
+	}
+
+	// Validate host
+	if parsedURL.Host == "" {
+		return "", fmt.Errorf("missing host in URL")
+	}
+
+	// Return normalized URL
+	return parsedURL.String(), nil
 }
