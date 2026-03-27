@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -20,14 +21,16 @@ type TokenManager struct {
 	minRefreshInterval time.Duration
 	group              singleflight.Group
 	lastRefreshTime    time.Time
-	logger             types.Logger
+	logger             *slog.Logger
+	closeCh            chan struct{}
+	closeOnce          sync.Once
 }
 
 // TokenManagerConfig represents token manager configuration
 type TokenManagerConfig struct {
 	RefreshMargin      time.Duration
 	MinRefreshInterval time.Duration
-	Logger             types.Logger
+	Logger             *slog.Logger
 }
 
 // NewTokenManager creates new token manager
@@ -38,19 +41,31 @@ func NewTokenManager(client *OAuthClient, cfg TokenManagerConfig) *TokenManager 
 	if cfg.MinRefreshInterval == 0 {
 		cfg.MinRefreshInterval = types.DefaultMinRefreshInt
 	}
-	if cfg.Logger == nil {
-		cfg.Logger = types.NoopLogger{}
+
+	// Unified logger handling: fallback to default if nil
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.Default()
 	}
+
 	return &TokenManager{
 		client:             client,
 		refreshMargin:      cfg.RefreshMargin,
 		minRefreshInterval: cfg.MinRefreshInterval,
-		logger:             cfg.Logger,
+		logger:             logger,
+		closeCh:            make(chan struct{}),
 	}
 }
 
 // GetToken returns valid token
 func (tm *TokenManager) GetToken(ctx context.Context) (string, error) {
+	// Check if token manager is closed
+	select {
+	case <-tm.closeCh:
+		return "", fmt.Errorf("token manager is closed")
+	default:
+	}
+
 	tm.mu.RLock()
 	if tm.currentToken != nil && tm.currentToken.IsValid(tm.refreshMargin) {
 		token := tm.currentToken.Value
@@ -69,6 +84,13 @@ func (tm *TokenManager) GetToken(ctx context.Context) (string, error) {
 }
 
 func (tm *TokenManager) refreshInternal(ctx context.Context) (string, error) {
+	// Check if token manager is closed
+	select {
+	case <-tm.closeCh:
+		return "", fmt.Errorf("token manager is closed")
+	default:
+	}
+
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
@@ -81,12 +103,22 @@ func (tm *TokenManager) refreshInternal(ctx context.Context) (string, error) {
 			tm.logger.Debug("rate limit: using cached token")
 			return tm.currentToken.Value, nil
 		}
+
 		wait := tm.minRefreshInterval - time.Since(tm.lastRefreshTime)
-		tm.logger.Debug("rate limit: waiting %v", wait.Round(time.Second))
+		tm.logger.Debug("rate limit: waiting",
+			slog.Duration("wait", wait.Round(time.Second)),
+		)
+
+		// Use time.NewTimer instead of time.After for better resource cleanup
+		timer := time.NewTimer(wait)
+		defer timer.Stop()
+
 		select {
-		case <-time.After(wait):
+		case <-timer.C:
 		case <-ctx.Done():
 			return "", ctx.Err()
+		case <-tm.closeCh:
+			return "", fmt.Errorf("token manager closed during wait")
 		}
 	}
 
@@ -101,21 +133,32 @@ func (tm *TokenManager) refreshInternal(ctx context.Context) (string, error) {
 
 	tm.currentToken = newToken
 	tm.lastRefreshTime = time.Now()
-	tm.logger.Debug("new token acquired, TTL: %v", time.Until(newToken.ExpiresAt).Round(time.Second))
+	tm.logger.Debug("new token acquired",
+		slog.Duration("ttl", time.Until(newToken.ExpiresAt).Round(time.Second)),
+	)
 	return newToken.Value, nil
 }
 
 // GetTokenWithHeader returns Authorization header value
+// Note: token value is already validated and sanitized by the OAuth server,
+// so we don't need to trim spaces. We keep the token as-is.
 func (tm *TokenManager) GetTokenWithHeader(ctx context.Context) (string, error) {
 	token, err := tm.GetToken(ctx)
 	if err != nil {
 		return "", err
 	}
-	return "Bearer " + strings.TrimSpace(token), nil
+	return "Bearer " + token, nil // No TrimSpace - token is already clean
 }
 
 // ForceRefresh forces token refresh
 func (tm *TokenManager) ForceRefresh(ctx context.Context) error {
+	// Check if token manager is closed
+	select {
+	case <-tm.closeCh:
+		return fmt.Errorf("token manager is closed")
+	default:
+	}
+
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
@@ -141,6 +184,26 @@ func (tm *TokenManager) GetTokenInfo() map[string]interface{} {
 		info["last_refresh"] = tm.lastRefreshTime.Format(time.RFC3339)
 	}
 	return info
+}
+
+// Close cleans up token manager resources
+func (tm *TokenManager) Close() error {
+	tm.closeOnce.Do(func() {
+		close(tm.closeCh)
+
+		// Cancel any ongoing operations
+		tm.mu.Lock()
+		defer tm.mu.Unlock()
+
+		// Clear sensitive data
+		if tm.currentToken != nil {
+			tm.currentToken.Value = "" // Clear token value
+			tm.currentToken = nil
+		}
+
+		tm.logger.Debug("token manager closed")
+	})
+	return nil // Always return nil as there's no error case
 }
 
 func isRateLimitError(err error) bool {
